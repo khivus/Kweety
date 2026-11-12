@@ -120,8 +120,8 @@ class KweetyCore {
 
 class KweetyStore {
     static Defaults() => {Enabled: 1, FastPaste: 1, Space: 1, Enter: 1, Tab: 0,
-        LayoutKey: "^!l", CaseKey: "^!u", MenuKey: "^!Space", Excluded: [],
-        Items: [{Trigger: "fff", Text: "Привет это тестовое сообщение"}]}
+        LayoutKey: "", CaseKey: "", MenuKey: "", Excluded: [],
+        Items: [{Trigger: "fff", Text: "тестовый текст"}]}
 
     static Load(path) {
         if !FileExist(path)
@@ -163,6 +163,12 @@ class KweetyStore {
         defaults := this.Defaults()
         for property in ["LayoutKey", "CaseKey", "MenuKey"]
             cfg.%property% := data["Kweety"].Has(property) ? KweetyCore.Decode(data["Kweety"][property]) : defaults.%property%
+        ; Remove defaults assigned by 0.2.0 once; retain custom or later opt-in keys.
+        if !data["Kweety"].Has("HotkeysOptIn") {
+            for property, oldDefault in Map("LayoutKey", "^!l", "CaseKey", "^!u", "MenuKey", "^!Space")
+                if StrLower(cfg.%property%) == StrLower(oldDefault)
+                    cfg.%property% := ""
+        }
         cfg.Excluded := []
         if data["Kweety"].Has("Excluded") {
             for rule in StrSplit(KweetyCore.Decode(data["Kweety"]["Excluded"]), "`n", "`r")
@@ -182,6 +188,11 @@ class KweetyStore {
                 if data[section].Has(property)
                     cfg.Items[-1].%property% := KweetyCore.Decode(data[section][property])
         }
+        for item in cfg.Items {
+            if item.Trigger = "fff" && item.Text == "Привет это тестовое сообщение"
+                && !item.HasOwnProp("Rtf") && !item.HasOwnProp("Html")
+                item.Text := "тестовый текст"
+        }
         KweetyCore.Validate(cfg.Items)
         return cfg
     }
@@ -200,7 +211,7 @@ class KweetyStore {
             throw Error("Выберите хотя бы одну клавишу замены.")
         SplitPath(path, , &dir)
         DirCreate(dir)
-        content := "[Kweety]`r`nVersion=2`r`nCount=" cfg.Items.Length "`r`n"
+        content := "[Kweety]`r`nVersion=2`r`nHotkeysOptIn=1`r`nCount=" cfg.Items.Length "`r`n"
         for name in ["Enabled", "FastPaste", "Space", "Enter", "Tab"]
             content .= name "=" cfg.%name% "`r`n"
         defaults := this.Defaults()

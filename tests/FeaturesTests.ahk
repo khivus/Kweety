@@ -78,8 +78,21 @@ try {
     legacy := "[Kweety]`r`nVersion=1`r`nCount=1`r`nEnabled=1`r`nSpace=1`r`nEnter=1`r`nTab=0`r`n[Snippet1]`r`nTrigger=fff`r`nText=" KweetyCore.Encode("Старый шаблон") "`r`n"
     FileAppend(legacy, legacyPath, "UTF-16")
     legacyLoaded := KweetyStore.Load(legacyPath)
-    Verify(legacyLoaded.Items[1].Text == "Старый шаблон" && legacyLoaded.LayoutKey == "^!l" && legacyLoaded.Excluded.Length = 0, "old v1 configuration upgraded in memory without data loss")
+    Verify(legacyLoaded.Items[1].Text == "Старый шаблон" && legacyLoaded.LayoutKey == "" && legacyLoaded.CaseKey == "" && legacyLoaded.MenuKey == "" && legacyLoaded.Excluded.Length = 0, "old v1 configuration does not assign hotkeys")
+    assigned := StrReplace(FileRead(testDir "\settings.ini"), "HotkeysOptIn=1`r`n", "")
+    assigned := RegExReplace(assigned, "m)^LayoutKey=[^\r\n]*", "LayoutKey=" KweetyCore.Encode("^!l"))
+    assigned := RegExReplace(assigned, "m)^CaseKey=[^\r\n]*", "CaseKey=" KweetyCore.Encode("^!u"))
+    assigned := RegExReplace(assigned, "m)^MenuKey=[^\r\n]*", "MenuKey=" KweetyCore.Encode("^!Space"))
+    legacyFile := FileOpen(legacyPath, "w", "UTF-16")
+    legacyFile.Write(assigned)
+    legacyFile.Close()
+    legacyLoaded := KweetyStore.Load(legacyPath)
+    Verify(legacyLoaded.LayoutKey == "" && legacyLoaded.CaseKey == "" && legacyLoaded.MenuKey == "", "previous default assignments removed on upgrade")
+    cfg.LayoutKey := "^!l"
+    KweetyStore.Save(legacyPath, cfg)
+    Verify(KweetyStore.Load(legacyPath).LayoutKey == "^!l", "explicit later hotkey assignment retained")
     FileDelete(legacyPath)
+    FileDelete(legacyPath ".bak")
     preferencesPath := testDir "\preferences.xml"
     FileAppend('<PuntoSwitcherSettings version="7"><RunAtStartup>Yes</RunAtStartup><ReplaceOnSpace>No</ReplaceOnSpace><ReplaceOnEnterAndTab>Yes</ReplaceOnEnterAndTab><ProgramsExceptions>code.exe;Discord.exe</ProgramsExceptions></PuntoSwitcherSettings>', preferencesPath, "UTF-8")
     preferences := KweetyPunto.Preferences(preferencesPath)

@@ -3,7 +3,7 @@
 #ClipboardTimeout 50
 ;@Ahk2Exe-SetName Kweety
 ;@Ahk2Exe-SetDescription Kweety - text expansion
-;@Ahk2Exe-SetVersion 0.2.0
+;@Ahk2Exe-SetVersion 0.2.1
 #Include lib\Core.ahk
 #Include lib\Paste.ahk
 #Include lib\Startup.ahk
@@ -59,8 +59,6 @@ class KweetyApp {
         this.EditorCondition := (*) => IsObject(this.RichEditor) && DllCall("GetFocus", "Ptr") = this.RichEditor.Hwnd
         HotIf(this.EditorCondition)
         Hotkey("^v", (*) => this.RichEditor.PasteFormatted())
-        for key, kind in Map("^b", "bold", "^i", "italic", "^u", "underline")
-            Hotkey(key, this.EditorFormat.Bind(this, kind))
         HotIf()
         A_TrayMenu.Delete()
         A_TrayMenu.Add("Открыть Kweety", (*) => this.Show())
@@ -74,7 +72,7 @@ class KweetyApp {
     }
 
     BuildGui() {
-        g := this.Window := Gui(, "Kweety 0.2.0 — быстрые ответы")
+        g := this.Window := Gui(, "Kweety 0.2.1 — быстрые ответы")
         g.SetFont("s10", "Segoe UI")
         g.MarginX := 20
         g.MarginY := 16
