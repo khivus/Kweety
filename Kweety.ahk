@@ -3,7 +3,7 @@
 #ClipboardTimeout 50
 ;@Ahk2Exe-SetName Kweety
 ;@Ahk2Exe-SetDescription Kweety - text expansion
-;@Ahk2Exe-SetVersion 0.2.1
+;@Ahk2Exe-SetVersion 0.2.2
 #Include lib\Core.ahk
 #Include lib\Paste.ahk
 #Include lib\Startup.ahk
@@ -62,17 +62,18 @@ class KweetyApp {
         HotIf()
         A_TrayMenu.Delete()
         A_TrayMenu.Add("Открыть Kweety", (*) => this.Show())
-        A_TrayMenu.Add("Включить / приостановить", (*) => this.Toggle())
+        this.TrayLabel := "Состояние замены"
+        A_TrayMenu.Add(this.TrayLabel, (*) => this.Toggle())
         A_TrayMenu.Add()
         A_TrayMenu.Add("Выход", (*) => ExitApp())
         A_TrayMenu.Default := "Открыть Kweety"
         if !A_IsCompiled && FileExist(A_ScriptDir "\assets\Kweety.ico")
             TraySetIcon(A_ScriptDir "\assets\Kweety.ico")
-        A_IconTip := "Kweety — сокращения текста"
+        this.UpdateTray()
     }
 
     BuildGui() {
-        g := this.Window := Gui(, "Kweety 0.2.1 — быстрые ответы")
+        g := this.Window := Gui(, "Kweety 0.2.2 — быстрые ответы")
         g.SetFont("s10", "Segoe UI")
         g.MarginX := 20
         g.MarginY := 16
@@ -146,6 +147,11 @@ class KweetyApp {
         this.Window.Opt("-Disabled")
         picker := this.Picker()
         picker.Destroy()
+        enabled := this.Config.Enabled
+        this.Config.Enabled := !enabled
+        this.UpdateTray()
+        this.Config.Enabled := enabled
+        this.UpdateTray()
     }
 
     Refresh() {
@@ -158,7 +164,22 @@ class KweetyApp {
             cb.Value := this.Config.%name%
         this.FillList()
         this.Status.Text := (this.Config.Enabled ? "● Работает" : "● Приостановлено") "  ·  Шаблонов: " this.Config.Items.Length
-        A_IconTip := "Kweety — " (this.Config.Enabled ? "работает" : "приостановлено")
+        this.UpdateTray()
+    }
+
+    UpdateTray() {
+        A_IconTip := "Kweety — замена " (this.Config.Enabled ? "включена" : "выключена")
+        if !this.HasOwnProp("TrayLabel")
+            return
+        label := this.Config.Enabled ? "Замена включена — выключить" : "Замена выключена — включить"
+        if label != this.TrayLabel {
+            A_TrayMenu.Rename(this.TrayLabel, label)
+            this.TrayLabel := label
+        }
+        if this.Config.Enabled
+            A_TrayMenu.Check(label)
+        else
+            A_TrayMenu.Uncheck(label)
     }
 
     FillList() {
