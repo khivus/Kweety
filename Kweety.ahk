@@ -3,10 +3,13 @@
 #ClipboardTimeout 50
 ;@Ahk2Exe-SetName Kweety
 ;@Ahk2Exe-SetDescription Kweety - text expansion
-;@Ahk2Exe-SetVersion 0.1.3
+;@Ahk2Exe-SetVersion 0.2.0
 #Include lib\Core.ahk
 #Include lib\Paste.ahk
 #Include lib\Startup.ahk
+#Include lib\TextTools.ahk
+#Include lib\Punto.ahk
+#Include lib\Rich.ahk
 
 SetWorkingDir(A_ScriptDir)
 SendMode("Input")
@@ -15,12 +18,16 @@ SetKeyDelay(-1, -1)
 SetTitleMatchMode(2)
 try {
     app := KweetyApp()
+    if A_Args.Length && A_Args[1] = "--smoke-test"
+        app.SmokeTest()
 } catch as err {
-    MsgBox("Не удалось запустить Kweety.`n`n" err.Message, "Kweety", "Iconx")
+    if A_Args.Length && A_Args[1] = "--smoke-test"
+        FileAppend(err.Message "`n" err.Stack "`n", "**", "UTF-8")
+    else
+        MsgBox("Не удалось запустить Kweety.`n`n" err.Message, "Kweety", "Iconx")
     ExitApp(1)
 }
 if A_Args.Length && A_Args[1] = "--smoke-test" {
-    app.SmokeTest()
     FileAppend("Startup and hotstring registration OK`n", "*", "UTF-8")
     ExitApp(0)
 }
@@ -34,6 +41,10 @@ class KweetyApp {
         this.Paste := KweetyPaste()
         OnExit((*) => (this.Paste.Restore(), 0))
         this.Registered := []
+        this.FeatureKeys := []
+        this.VisibleItems := []
+        this.RichEditor := false
+        this.CachedWindow := 0
         this.Testing := A_Args.Length && A_Args[1] = "--smoke-test"
         this.Startup := KweetyStartup()
         ; Follow an explicitly enabled startup setting when the EXE is updated/moved.
@@ -42,9 +53,15 @@ class KweetyApp {
             catch as err
                 MsgBox("Не удалось обновить путь автозапуска.`n`n" err.Message, "Kweety", "Icon!")
         }
-        this.Condition := (*) => !this.Testing && this.Config.Enabled && !WinActive("ahk_pid " DllCall("GetCurrentProcessId"))
+        this.Condition := (*) => this.Allowed()
         this.BuildGui()
         this.Apply()
+        this.EditorCondition := (*) => IsObject(this.RichEditor) && DllCall("GetFocus", "Ptr") = this.RichEditor.Hwnd
+        HotIf(this.EditorCondition)
+        Hotkey("^v", (*) => this.RichEditor.PasteFormatted())
+        for key, kind in Map("^b", "bold", "^i", "italic", "^u", "underline")
+            Hotkey(key, this.EditorFormat.Bind(this, kind))
+        HotIf()
         A_TrayMenu.Delete()
         A_TrayMenu.Add("Открыть Kweety", (*) => this.Show())
         A_TrayMenu.Add("Включить / приостановить", (*) => this.Toggle())
@@ -57,7 +74,7 @@ class KweetyApp {
     }
 
     BuildGui() {
-        g := this.Window := Gui(, "Kweety 0.1.3 — быстрые ответы")
+        g := this.Window := Gui(, "Kweety 0.2.0 — быстрые ответы")
         g.SetFont("s10", "Segoe UI")
         g.MarginX := 20
         g.MarginY := 16
@@ -78,7 +95,10 @@ class KweetyApp {
             this.Keys[key] := cb
         }
         this.ModeHint := g.AddText("xm y+18 w730 c555555", "")
-        this.List := g.AddListView("xm y+16 w730 r12 -Multi", ["Сокращение", "В другой раскладке", "Текст"])
+        g.AddText("xm y+14", "Поиск шаблонов:")
+        this.Search := g.AddEdit("x+12 yp-3 w550")
+        this.Search.OnEvent("Change", (*) => this.FillList())
+        this.List := g.AddListView("xm y+12 w730 r8 -Multi", ["Сокращение", "В другой раскладке", "Текст"])
         this.List.ModifyCol(1, 130)
         this.List.ModifyCol(2, 170)
         this.List.ModifyCol(3, 405)
@@ -86,10 +106,12 @@ class KweetyApp {
         g.AddButton("xm y+12 w150 Default", "Добавить").OnEvent("Click", (*) => this.Edit(true))
         g.AddButton("x+10 w150", "Изменить").OnEvent("Click", (*) => this.Edit())
         g.AddButton("x+10 w120", "Удалить").OnEvent("Click", (*) => this.Delete())
-        g.AddText("xm y+18 w730 c555555", "Пример: fff или ааа → Привет это тестовое сообщение`nРаботает с отдельными словами, без учёта регистра. Двойной щелчок — изменить.")
+        g.AddText("xm y+14 w730 c555555", "Двойной щелчок — изменить. Цвет и начертание доступны в редакторе шаблона.")
         this.Status := g.AddText("xm y+12 w730", "")
         g.AddButton("xm y+14 w170", "Свернуть в трей").OnEvent("Click", (*) => g.Hide())
         g.AddButton("x+10 w150", "Папка настроек").OnEvent("Click", (*) => this.OpenData())
+        g.AddButton("x+10 w170", "Клавиши и исключения").OnEvent("Click", (*) => this.Settings())
+        g.AddButton("x+10 w140", "Импорт Punto").OnEvent("Click", (*) => this.ImportPunto())
         g.OnEvent("Close", (*) => g.Hide())
         g.OnEvent("Escape", (*) => g.Hide())
         this.Refresh()
@@ -116,6 +138,16 @@ class KweetyApp {
         this.Apply()
         this.Config := original
         this.Apply()
+        editor := this.Edit(true)
+        this.RichEditor.Export()
+        editor.Destroy()
+        this.RichEditor := false
+        this.Window.Opt("-Disabled")
+        settings := this.Settings()
+        settings.Destroy()
+        this.Window.Opt("-Disabled")
+        picker := this.Picker()
+        picker.Destroy()
     }
 
     Refresh() {
@@ -126,18 +158,29 @@ class KweetyApp {
             : "Клавиша замены поглощается. Переносы внутри текста — Shift+Enter."
         for name, cb in this.Keys
             cb.Value := this.Config.%name%
-        this.List.Delete()
-        for item in this.Config.Items {
-            aliases := KweetyCore.Aliases(item.Trigger)
-            preview := StrReplace(StrReplace(item.Text, "`r"), "`n", " ↵ ")
-            this.List.Add(, item.Trigger, aliases[aliases.Length], SubStr(preview, 1, 180))
-        }
+        this.FillList()
         this.Status.Text := (this.Config.Enabled ? "● Работает" : "● Приостановлено") "  ·  Шаблонов: " this.Config.Items.Length
         A_IconTip := "Kweety — " (this.Config.Enabled ? "работает" : "приостановлено")
     }
 
+    FillList() {
+        this.List.Delete(), this.VisibleItems := []
+        for index, item in this.Config.Items {
+            if !KweetyText.Matches(item, this.Search.Value)
+                continue
+            aliases := KweetyCore.Aliases(item.Trigger)
+            preview := StrReplace(StrReplace(item.Text, "`r"), "`n", " ↵ ")
+            this.List.Add(, item.Trigger, aliases[aliases.Length], SubStr(preview, 1, 180))
+            this.VisibleItems.Push(index)
+        }
+    }
+
     Apply() {
+        this.CachedWindow := 0
         HotIf(this.Condition)
+        for key in this.FeatureKeys
+            Hotkey(key, "Off")
+        this.FeatureKeys := []
         for name in this.Registered
             Hotstring(name, , "Off")
         this.Registered := []
@@ -148,25 +191,40 @@ class KweetyApp {
             for alias in KweetyCore.Aliases(item.Trigger) {
                 ; B0: delete the abbreviation in the SAME send as its replacement.
                 name := ":B0OC1X:" alias
-                Hotstring(name, this.Expand.Bind(this, payload, StrLen(alias), item.Text), "On")
+                Hotstring(name, this.Expand.Bind(this, payload, StrLen(alias), item), "On")
                 this.Registered.Push(name)
             }
+        }
+        used := Map()
+        for kind, property in Map("layout", "LayoutKey", "case", "CaseKey", "menu", "MenuKey") {
+            key := this.Config.%property%
+            if key = ""
+                continue
+            if !RegExMatch(key, "[!^#]") && !RegExMatch(key, "i)^(F([1-9]|1[0-9]|2[0-4])|Pause|ScrollLock)$")
+                throw Error("Для горячих клавиш используйте Ctrl или Alt, либо отдельную функциональную клавишу F1–F24.")
+            if used.Has(StrLower(key))
+                throw Error("Горячие клавиши не должны совпадать.")
+            used[StrLower(key)] := true
+            action := kind = "menu" ? this.Picker.Bind(this) : this.Transform.Bind(this, kind)
+            Hotkey(key, action, "On")
+            this.FeatureKeys.Push(key)
         }
         HotIf()
         Hotstring("Reset")
     }
 
-    Expand(payload, eraseCount, text, *) {
+    Expand(payload, eraseCount, item, *) {
         ; Prevent a second expansion from interrupting a long template.
         Critical("On")
         try {
             SetKeyDelay(-1, -1)
-            if this.Config.FastPaste {
-                if !this.Paste.Prepare(text) {
+            rich := item.HasOwnProp("Rtf") && item.Rtf != ""
+            if this.Config.FastPaste || rich {
+                if !this.Paste.Prepare(item.Text, rich ? item.Rtf : "", item.HasOwnProp("Html") ? item.Html : "") {
                     TrayTip("Не удалось получить буфер обмена. Сокращение осталось на месте; повторите его набор.", "Kweety — вставка не выполнена", 2)
                     return
                 }
-                try SendInput(KweetyPaste.PasteKeys(eraseCount))
+                try SendInput(eraseCount ? KweetyPaste.PasteKeys(eraseCount) : "^v")
                 finally this.Paste.ScheduleRestore()
             } else {
                 for i, batch in payload
@@ -179,19 +237,25 @@ class KweetyApp {
     }
 
     Persist(cfg) {
-        try KweetyStore.Save(this.Path, cfg)
+        previous := this.Config
+        try {
+            this.Config := cfg
+            this.Apply()
+            KweetyStore.Save(this.Path, cfg)
+        }
         catch as err {
+            this.Config := previous
+            this.Apply()
             MsgBox(err.Message, "Не удалось сохранить", "Iconx")
             return false
         }
-        this.Config := cfg
-        this.Apply()
         this.Refresh()
         return true
     }
 
     CopyConfig() => {Enabled: this.Config.Enabled, FastPaste: this.Config.FastPaste, Space: this.Config.Space,
-        Enter: this.Config.Enter, Tab: this.Config.Tab, Items: this.Config.Items.Clone()}
+        Enter: this.Config.Enter, Tab: this.Config.Tab, Items: this.Config.Items.Clone(),
+        LayoutKey: this.Config.LayoutKey, CaseKey: this.Config.CaseKey, MenuKey: this.Config.MenuKey, Excluded: this.Config.Excluded.Clone()}
 
     SaveOptions() {
         cfg := this.CopyConfig()
@@ -225,6 +289,7 @@ class KweetyApp {
         row := this.List.GetNext()
         if !row
             return
+        row := this.VisibleItems[row]
         if MsgBox("Удалить «" this.Config.Items[row].Trigger "»?", "Удаление шаблона", "YesNo Icon?") != "Yes"
             return
         cfg := this.CopyConfig()
@@ -236,6 +301,8 @@ class KweetyApp {
         row := isNew ? 0 : this.List.GetNext()
         if !isNew && !row
             return
+        if row
+            row := this.VisibleItems[row]
         original := row ? this.Config.Items[row] : {Trigger: "", Text: ""}
         editor := Gui("+Owner" this.Window.Hwnd, row ? "Изменить шаблон" : "Новый шаблон")
         editor.SetFont("s10", "Segoe UI")
@@ -245,7 +312,14 @@ class KweetyApp {
         trigger := editor.AddEdit("xm y+6 w580", original.Trigger)
         editor.AddText("xm y+10 w580 c555555", "Буквы, цифры, _ и -. Вторая раскладка добавится автоматически.")
         editor.AddText("xm y+16", "Текст подстановки")
-        body := editor.AddEdit("xm y+6 w580 r12 WantTab WantReturn", original.Text)
+        editor.AddButton("xm y+6 w65", "Ж").OnEvent("Click", (*) => body.Format("bold"))
+        editor.AddButton("x+6 w65", "К").OnEvent("Click", (*) => body.Format("italic"))
+        editor.AddButton("x+6 w65", "Ч").OnEvent("Click", (*) => body.Format("underline"))
+        color := editor.AddEdit("x+12 w95", "FF0000")
+        editor.AddButton("x+6 w75", "Цвет…").OnEvent("Click", (*) => this.SetColor(body, color))
+        editor.AddButton("x+6 w155", "Вставить с оформлением").OnEvent("Click", (*) => body.PasteFormatted())
+        body := KweetyRichEdit(editor, "xm y+8 w580 h240", original)
+        this.RichEditor := body
         editor.AddText("xm y+10 w580 c555555", "Enter создаёт строку. В режиме Ctrl+V переносы вставляются вместе с текстом.`nСимволы вроде {Enter}, ! и + вставляются буквально.")
         close := (*) => this.CloseEditor(editor, trigger, body, original)
         editor.AddButton("xm y+16 w140", "Сохранить").OnEvent("Click", (*) => this.SaveEditor(editor, trigger, body, row))
@@ -253,12 +327,14 @@ class KweetyApp {
         editor.OnEvent("Close", close)
         editor.OnEvent("Escape", close)
         this.Window.Opt("+Disabled")
-        editor.Show()
-        trigger.Focus()
+        editor.Show(this.Testing ? "Hide" : "")
+        if !this.Testing
+            trigger.Focus()
+        return editor
     }
 
     CloseEditor(editor, trigger, body, original) {
-        if (trigger.Value != original.Trigger || body.Value != original.Text)
+        if (trigger.Value != original.Trigger || body.Dirty())
             && MsgBox("Закрыть без сохранения изменений?", "Kweety", "YesNo Icon?") != "Yes"
             return true
         return this.FinishEditor(editor)
@@ -266,6 +342,7 @@ class KweetyApp {
 
     FinishEditor(editor) {
         this.Window.Opt("-Disabled")
+        this.RichEditor := false
         editor.Destroy()
         this.Show()
         return true
@@ -273,12 +350,256 @@ class KweetyApp {
 
     SaveEditor(editor, trigger, body, row) {
         cfg := this.CopyConfig()
-        item := {Trigger: StrLower(Trim(trigger.Value)), Text: body.Value}
+        item := body.Export()
+        item.Trigger := StrLower(Trim(trigger.Value))
         if row
             cfg.Items[row] := item
         else
             cfg.Items.Push(item)
         if this.Persist(cfg)
             this.FinishEditor(editor)
+    }
+
+    EditorFormat(kind, *) => this.RichEditor.Format(kind)
+
+    SetColor(body, control) {
+        color := Trim(control.Value, " #")
+        if !RegExMatch(color, "i)^[0-9a-f]{6}$") {
+            MsgBox("Введите цвет: 6 символов, например FF0000 — красный.", "Цвет")
+            return
+        }
+        rgb := Integer("0x" color)
+        bgr := ((rgb & 255) << 16) | (rgb & 0xFF00) | ((rgb >> 16) & 255)
+        custom := Buffer(64, 0), picker := Buffer(A_PtrSize = 8 ? 72 : 36, 0)
+        NumPut("UInt", picker.Size, picker)
+        NumPut("Ptr", DllCall("GetParent", "Ptr", body.Hwnd, "Ptr"), picker, A_PtrSize)
+        NumPut("UInt", bgr, picker, A_PtrSize * 3)
+        NumPut("Ptr", custom.Ptr, picker, A_PtrSize * 4)
+        NumPut("UInt", 3, picker, A_PtrSize * 5)
+        if !DllCall("comdlg32\ChooseColorW", "Ptr", picker)
+            return
+        bgr := NumGet(picker, A_PtrSize * 3, "UInt")
+        color := Format("{:02X}{:02X}{:02X}", bgr & 255, (bgr >> 8) & 255, (bgr >> 16) & 255)
+        control.Value := color
+        body.Format("color", color)
+    }
+
+    Allowed(hwnd := 0) {
+        if this.Testing || !this.Config.Enabled
+            return false
+        hwnd := hwnd ? hwnd : WinExist("A")
+        if !hwnd
+            return false
+        try {
+            if WinGetPID("ahk_id " hwnd) = DllCall("GetCurrentProcessId")
+                return false
+        } catch
+            return false
+        if this.CachedWindow != hwnd {
+            this.CachedWindow := hwnd
+            try {
+                this.CachedName := WinGetProcessName("ahk_id " hwnd)
+                this.CachedPath := WinGetProcessPath("ahk_id " hwnd)
+            } catch {
+                this.CachedWindow := 0
+                return false
+            }
+        }
+        return !KweetyText.Excluded(this.Config.Excluded, this.CachedName, this.CachedPath)
+    }
+
+    Transform(kind, *) {
+        Critical("On")
+        recoverClipboard := false
+        try {
+            if !this.Paste.Restore()
+                return
+            snapshot := ClipboardAll()
+            recoverClipboard := true
+            A_Clipboard := ""
+            SendInput("^c")
+            if !ClipWait(0.15) {
+                SendInput("^+{Left}^c")
+                if !ClipWait(0.3) {
+                    A_Clipboard := snapshot
+                    recoverClipboard := false
+                    return
+                }
+            }
+            text := A_Clipboard
+            this.Paste.SeedOriginal(snapshot)
+            recoverClipboard := false
+            replacement := kind = "layout" ? KweetyText.Layout(text) : KweetyText.Case(text)
+            if this.Paste.Prepare(replacement) {
+                try SendInput("^v")
+                finally this.Paste.ScheduleRestore()
+            } else
+                this.Paste.Restore()
+        } catch as err {
+            if recoverClipboard {
+                this.Paste.SeedOriginal(snapshot)
+                this.Paste.Restore()
+            }
+            TrayTip(err.Message, "Kweety — преобразование не выполнено", 2)
+        }
+        finally {
+            Hotstring("Reset")
+            Critical("Off")
+        }
+    }
+
+    Settings() {
+        dialog := Gui("+Owner" this.Window.Hwnd, "Клавиши и программы-исключения")
+        dialog.SetFont("s10", "Segoe UI")
+        controls := Map()
+        for property, label in Map("LayoutKey", "Исправить раскладку выделения / последнего слова", "CaseKey", "Сменить регистр выделения / последнего слова", "MenuKey", "Открыть поиск шаблонов") {
+            dialog.AddText("xm y+12 w500", label)
+            controls[property] := dialog.AddHotkey("xm y+6 w260", this.Config.%property%)
+        }
+        dialog.AddText("xm y+16 w540", "Программы-исключения: имя EXE или полный путь, по одному в строке.`nВ них отключаются и сокращения, и горячие клавиши Kweety.")
+        rules := ""
+        for rule in this.Config.Excluded
+            rules .= rule "`r`n"
+        excluded := dialog.AddEdit("xm y+8 w540 r6", rules)
+        dialog.AddButton("xm y+8 w200", "Добавить программу…").OnEvent("Click", (*) => this.AddExclusion(excluded))
+        close := (*) => (this.Window.Opt("-Disabled"), dialog.Destroy(), this.Show())
+        dialog.AddButton("xm y+12 w140", "Сохранить").OnEvent("Click", (*) => this.SaveSettings(controls, excluded, close))
+        dialog.AddButton("x+10 w140", "Отмена").OnEvent("Click", close)
+        dialog.OnEvent("Close", close)
+        dialog.OnEvent("Escape", close)
+        this.Window.Opt("+Disabled")
+        dialog.Show(this.Testing ? "Hide" : "")
+        return dialog
+    }
+
+    SaveSettings(controls, excluded, close) {
+        cfg := this.CopyConfig()
+        for property, control in controls
+            cfg.%property% := control.Value
+        cfg.Excluded := []
+        for rule in StrSplit(excluded.Value, "`n", "`r")
+            if Trim(rule) != ""
+                cfg.Excluded.Push(Trim(rule))
+        if this.Persist(cfg)
+            close.Call()
+    }
+
+    AddExclusion(control) {
+        path := FileSelect(1, , "Выберите программу-исключение", "Программы (*.exe)")
+        if path != "" {
+            SplitPath(path, &name)
+            control.Value := RTrim(control.Value, "`r`n") (control.Value = "" ? "" : "`r`n") name
+        }
+    }
+
+    Picker(*) {
+        target := WinExist("A")
+        if !this.Testing && !this.Allowed(target)
+            return
+        popup := Gui("+AlwaysOnTop +ToolWindow", "Вставить шаблон — Kweety")
+        popup.SetFont("s10", "Segoe UI")
+        search := popup.AddEdit("w620")
+        list := popup.AddListView("xm y+10 w620 r10 -Multi", ["Сокращение", "Текст"])
+        list.ModifyCol(1, 120), list.ModifyCol(2, 470)
+        rows := []
+        fill := (*) => this.FillPicker(list, search.Value, rows)
+        search.OnEvent("Change", fill)
+        insert := (*) => this.PickInsert(popup, list, rows, target)
+        popup.AddButton("xm y+10 w140 Default", "Вставить").OnEvent("Click", insert)
+        popup.AddButton("x+10 w140", "Отмена").OnEvent("Click", (*) => popup.Destroy())
+        list.OnEvent("DoubleClick", insert)
+        popup.OnEvent("Escape", (*) => popup.Destroy())
+        popup.OnEvent("Close", (*) => popup.Destroy())
+        fill.Call()
+        popup.Show(this.Testing ? "Hide" : "")
+        if !this.Testing
+            search.Focus()
+        return popup
+    }
+
+    FillPicker(list, query, rows) {
+        list.Delete(), rows.Length := 0
+        for item in this.Config.Items {
+            if KweetyText.Matches(item, query) {
+                list.Add(, item.Trigger, SubStr(StrReplace(StrReplace(item.Text, "`r"), "`n", " ↵ "), 1, 100))
+                rows.Push(item)
+            }
+        }
+        if rows.Length
+            list.Modify(1, "Select Focus")
+    }
+
+    PickInsert(popup, list, rows, target) {
+        row := list.GetNext()
+        if !row || !WinExist("ahk_id " target) || !this.Allowed(target)
+            return
+        item := rows[row]
+        popup.Destroy()
+        WinActivate("ahk_id " target)
+        if WinWaitActive("ahk_id " target, , 0.5)
+            this.Expand(KweetyCore.CompileBatches(item.Text), 0, item)
+    }
+
+    ImportPunto() {
+        path := FileSelect(1, KweetyPunto.Find(), "Выберите replace.dat Punto Switcher", "Автозамены Punto (replace.dat)")
+        if path = ""
+            return
+        try result := KweetyPunto.Merge(this.Config.Items, KweetyPunto.Read(path))
+        catch as err {
+            MsgBox(err.Message, "Импорт Punto", "Iconx")
+            return
+        }
+        SplitPath(path, , &directory)
+        try preferences := KweetyPunto.Preferences(directory "\preferences.xml")
+        catch as err
+            preferences := {Keys: Map(), Excluded: [], Startup: -1, Summary: "Настройки не прочитаны: " err.Message}
+        dialog := Gui("+Owner" this.Window.Hwnd, "Предпросмотр импорта Punto")
+        dialog.SetFont("s10", "Segoe UI")
+        dialog.AddText("w720", "Будет добавлено: " result.Added ". Пропущено: " result.Skipped.Length ".`nСуществующие шаблоны и файлы Punto не изменяются.")
+        preview := dialog.AddListView("xm y+12 w720 r7", ["Сокращение", "Текст"])
+        preview.ModifyCol(1, 140), preview.ModifyCol(2, 550)
+        Loop result.Added {
+            item := result.Items[this.Config.Items.Length + A_Index]
+            preview.Add(, item.Trigger, SubStr(StrReplace(StrReplace(item.Text, "`r"), "`n", " ↵ "), 1, 180))
+        }
+        issues := ""
+        for issue in result.Skipped
+            issues .= issue "`r`n"
+        dialog.AddEdit("xm y+10 w720 r3 ReadOnly", issues = "" ? "Конфликтов нет." : issues)
+        dialog.AddEdit("xm y+10 w720 r4 ReadOnly", preferences.Summary)
+        options := dialog.AddCheckbox("xm y+10", "Перенести найденные клавиши замены и программы-исключения")
+        options.Enabled := preferences.Keys.Count || preferences.Excluded.Length
+        autostart := dialog.AddCheckbox("xm y+10", "Перенести настройку автозапуска (Kweety запускается в трей)")
+        autostart.Enabled := preferences.Startup != -1
+        close := (*) => (this.Window.Opt("-Disabled"), dialog.Destroy(), this.Show())
+        dialog.AddButton("xm y+12 w160", "Импортировать").OnEvent("Click", (*) => this.SaveImport(result, preferences, options.Value, autostart.Value, close))
+        dialog.AddButton("x+10 w140", "Отмена").OnEvent("Click", close)
+        dialog.OnEvent("Close", close), dialog.OnEvent("Escape", close)
+        this.Window.Opt("+Disabled")
+        dialog.Show()
+    }
+
+    SaveImport(result, preferences, copyOptions, copyStartup, close) {
+        cfg := this.CopyConfig(), cfg.Items := result.Items
+        if copyOptions {
+            for key, value in preferences.Keys
+                cfg.%key% := value
+            for rule in preferences.Excluded
+                if !KweetyText.Excluded(cfg.Excluded, rule)
+                    cfg.Excluded.Push(rule)
+        }
+        oldStartup := this.Startup.IsEnabled()
+        if copyStartup {
+            try this.Startup.SetEnabled(preferences.Startup)
+            catch as err {
+                MsgBox(err.Message, "Не удалось перенести автозапуск", "Iconx")
+                return
+            }
+        }
+        if this.Persist(cfg) {
+            this.Autostart.Value := this.Startup.IsEnabled()
+            close.Call()
+        } else if copyStartup
+            this.Startup.SetEnabled(oldStartup)
     }
 }

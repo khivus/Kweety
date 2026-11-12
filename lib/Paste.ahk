@@ -5,6 +5,57 @@ class KweetyWindowsClipboard {
     Sequence() => DllCall("GetClipboardSequenceNumber", "UInt")
     Write(text) => A_Clipboard := text
     Restore(data) => A_Clipboard := data
+
+    static ReadFormat(name, encoding := "CP0") {
+        format := DllCall("RegisterClipboardFormat", "Str", name, "UInt")
+        if !DllCall("OpenClipboard", "Ptr", A_ScriptHwnd)
+            return ""
+        try {
+            handle := DllCall("GetClipboardData", "UInt", format, "Ptr")
+            if !handle
+                return ""
+            pointer := DllCall("GlobalLock", "Ptr", handle, "Ptr")
+            if !pointer
+                return ""
+            try {
+                size := DllCall("GlobalSize", "Ptr", handle, "UPtr")
+                if size > 8000000
+                    throw Error("Слишком большой объём форматированного текста.")
+                return RTrim(StrGet(pointer, size, encoding), Chr(0))
+            } finally DllCall("GlobalUnlock", "Ptr", handle)
+        } finally DllCall("CloseClipboard")
+    }
+
+    WriteRich(text, rtf, html) {
+        this.Write(text)
+        if !DllCall("OpenClipboard", "Ptr", A_ScriptHwnd)
+            throw Error("Буфер обмена занят.")
+        try {
+            if rtf != ""
+                this.AddFormat("Rich Text Format", rtf, "CP0")
+            if html != ""
+                this.AddFormat("HTML Format", KweetyRich.ClipboardHtml(html), "UTF-8")
+        } finally DllCall("CloseClipboard")
+    }
+
+    AddFormat(name, value, encoding) {
+        format := DllCall("RegisterClipboardFormat", "Str", name, "UInt")
+        size := StrPut(value, encoding)
+        handle := DllCall("GlobalAlloc", "UInt", 0x42, "UPtr", size, "Ptr")
+        if !handle
+            throw Error("Недостаточно памяти для буфера обмена.")
+        pointer := DllCall("GlobalLock", "Ptr", handle, "Ptr")
+        if !pointer {
+            DllCall("GlobalFree", "Ptr", handle)
+            throw Error("Не удалось подготовить буфер обмена.")
+        }
+        StrPut(value, pointer, size, encoding)
+        DllCall("GlobalUnlock", "Ptr", handle)
+        if !DllCall("SetClipboardData", "UInt", format, "Ptr", handle, "Ptr") {
+            DllCall("GlobalFree", "Ptr", handle)
+            throw Error("Не удалось записать оформление в буфер обмена.")
+        }
+    }
 }
 
 class KweetyPaste {
@@ -29,22 +80,41 @@ class KweetyPaste {
         return "{Backspace " eraseCount "}^v"
     }
 
-    Prepare(text) {
+    Prepare(text, rtf := "", html := "") {
         if !KweetyPaste.CanPaste(text)
             return false
+        wroteClipboard := false
         try {
             ; A second expansion must retain the ORIGINAL clipboard, not our text.
             saved := this.Pending && this.Clipboard.Sequence() = this.Expected
                 ? this.Saved : this.Clipboard.Capture()
-            this.Clipboard.Write(KweetyPaste.ClipboardText(text))
+            this.Saved := saved
+            if rtf != "" || html != "" {
+                wroteClipboard := true
+                this.Clipboard.WriteRich(KweetyPaste.ClipboardText(text), rtf, html)
+            } else
+                this.Clipboard.Write(KweetyPaste.ClipboardText(text))
             this.Expected := this.Clipboard.Sequence()
             this.Saved := saved
             this.Pending := true
             this.Retries := 0
             return true
         } catch {
+            if wroteClipboard {
+                this.Pending := true
+                this.Expected := this.Clipboard.Sequence()
+                this.Retries := 0
+                this.Restore()
+            }
             return false ; Leave the abbreviation untouched if the clipboard is busy.
         }
+    }
+
+    SeedOriginal(snapshot) {
+        this.Saved := snapshot
+        this.Pending := true
+        this.Expected := this.Clipboard.Sequence()
+        this.Retries := 0
     }
 
     ScheduleRestore() {

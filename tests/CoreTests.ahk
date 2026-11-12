@@ -1,7 +1,9 @@
+#Warn VarUnset, StdOut
 #Requires AutoHotkey v2.0
 #Include ..\lib\Core.ahk
 #Include ..\lib\Paste.ahk
 #Include ..\lib\Startup.ahk
+#Include ..\lib\Rich.ahk
 
 class FakeClipboard {
     Value := "original clipboard"

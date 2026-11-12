@@ -9,6 +9,7 @@ Push-Location $PSScriptRoot
 try {
     foreach ($scriptArgs in @(
         @('/ErrorStdOut', 'tests\CoreTests.ahk'),
+        @('/ErrorStdOut', 'tests\FeaturesTests.ahk'),
         @('/ErrorStdOut', 'Kweety.ahk', '--smoke-test')
     )) {
         $check = Start-Process -FilePath $runtime -ArgumentList $scriptArgs -Wait -PassThru -NoNewWindow

@@ -27,6 +27,9 @@ class KweetyCore {
                 throw Error("Введите текст для подстановки.")
             if StrLen(item.Text) > 50000
                 throw Error("Текст слишком длинный: максимум 50 000 символов.")
+            for property in ["Rtf", "Html"]
+                if item.HasOwnProp(property) && StrLen(item.%property%) > 4000000
+                    throw Error("Слишком большой объём оформления шаблона.")
             for alias in this.Aliases(item.Trigger) {
                 if used.Has(alias)
                     throw Error("Сокращение «" item.Trigger "» совпадает с «" used[alias] "» в одной из раскладок.")
@@ -117,6 +120,7 @@ class KweetyCore {
 
 class KweetyStore {
     static Defaults() => {Enabled: 1, FastPaste: 1, Space: 1, Enter: 1, Tab: 0,
+        LayoutKey: "^!l", CaseKey: "^!u", MenuKey: "^!Space", Excluded: [],
         Items: [{Trigger: "fff", Text: "Привет это тестовое сообщение"}]}
 
     static Load(path) {
@@ -143,7 +147,7 @@ class KweetyStore {
                 data[section][key] := SubStr(line, p + 1)
             }
         }
-        if this.Read(data, "Kweety", "Version") != "1"
+        if !InStr("|1|2|", "|" this.Read(data, "Kweety", "Version") "|")
             throw Error("Неизвестный формат настроек. Файл: " path)
         cfg := {Items: []}
         for name in ["Enabled", "Space", "Enter", "Tab"] {
@@ -156,6 +160,15 @@ class KweetyStore {
         if fastPaste != "0" && fastPaste != "1"
             throw Error("Повреждена настройка: FastPaste")
         cfg.FastPaste := Integer(fastPaste)
+        defaults := this.Defaults()
+        for property in ["LayoutKey", "CaseKey", "MenuKey"]
+            cfg.%property% := data["Kweety"].Has(property) ? KweetyCore.Decode(data["Kweety"][property]) : defaults.%property%
+        cfg.Excluded := []
+        if data["Kweety"].Has("Excluded") {
+            for rule in StrSplit(KweetyCore.Decode(data["Kweety"]["Excluded"]), "`n", "`r")
+                if Trim(rule) != ""
+                    cfg.Excluded.Push(Trim(rule))
+        }
         if !cfg.Space && !cfg.Enter && !cfg.Tab
             throw Error("В настройках не выбрана клавиша замены.")
         count := this.Read(data, "Kweety", "Count")
@@ -165,6 +178,9 @@ class KweetyStore {
             section := "Snippet" A_Index
             cfg.Items.Push({Trigger: this.Read(data, section, "Trigger"),
                 Text: KweetyCore.Decode(this.Read(data, section, "Text"))})
+            for property in ["Rtf", "Html"]
+                if data[section].Has(property)
+                    cfg.Items[-1].%property% := KweetyCore.Decode(data[section][property])
         }
         KweetyCore.Validate(cfg.Items)
         return cfg
@@ -184,11 +200,23 @@ class KweetyStore {
             throw Error("Выберите хотя бы одну клавишу замены.")
         SplitPath(path, , &dir)
         DirCreate(dir)
-        content := "[Kweety]`r`nVersion=1`r`nCount=" cfg.Items.Length "`r`n"
+        content := "[Kweety]`r`nVersion=2`r`nCount=" cfg.Items.Length "`r`n"
         for name in ["Enabled", "FastPaste", "Space", "Enter", "Tab"]
             content .= name "=" cfg.%name% "`r`n"
-        for i, item in cfg.Items
+        defaults := this.Defaults()
+        for property in ["LayoutKey", "CaseKey", "MenuKey"]
+            content .= property "=" KweetyCore.Encode(cfg.HasOwnProp(property) ? cfg.%property% : defaults.%property%) "`r`n"
+        excluded := ""
+        if cfg.HasOwnProp("Excluded")
+            for rule in cfg.Excluded
+                excluded .= (excluded = "" ? "" : "`n") rule
+        content .= "Excluded=" KweetyCore.Encode(excluded) "`r`n"
+        for i, item in cfg.Items {
             content .= "`r`n[Snippet" i "]`r`nTrigger=" item.Trigger "`r`nText=" KweetyCore.Encode(item.Text) "`r`n"
+            for property in ["Rtf", "Html"]
+                if item.HasOwnProp(property) && item.%property% != ""
+                    content .= property "=" KweetyCore.Encode(item.%property%) "`r`n"
+        }
         temp := path ".tmp"
         try {
             file := FileOpen(temp, "w", "UTF-16")
