@@ -3,9 +3,10 @@
 #ClipboardTimeout 50
 ;@Ahk2Exe-SetName Kweety
 ;@Ahk2Exe-SetDescription Kweety - text expansion
-;@Ahk2Exe-SetVersion 0.1.2
+;@Ahk2Exe-SetVersion 0.1.3
 #Include lib\Core.ahk
 #Include lib\Paste.ahk
+#Include lib\Startup.ahk
 
 SetWorkingDir(A_ScriptDir)
 SendMode("Input")
@@ -34,6 +35,13 @@ class KweetyApp {
         OnExit((*) => (this.Paste.Restore(), 0))
         this.Registered := []
         this.Testing := A_Args.Length && A_Args[1] = "--smoke-test"
+        this.Startup := KweetyStartup()
+        ; Follow an explicitly enabled startup setting when the EXE is updated/moved.
+        if !this.Testing && this.Startup.IsEnabled() {
+            try this.Startup.SetEnabled(true)
+            catch as err
+                MsgBox("Не удалось обновить путь автозапуска.`n`n" err.Message, "Kweety", "Icon!")
+        }
         this.Condition := (*) => !this.Testing && this.Config.Enabled && !WinActive("ahk_pid " DllCall("GetCurrentProcessId"))
         this.BuildGui()
         this.Apply()
@@ -49,7 +57,7 @@ class KweetyApp {
     }
 
     BuildGui() {
-        g := this.Window := Gui(, "Kweety 0.1.2 — быстрые ответы")
+        g := this.Window := Gui(, "Kweety 0.1.3 — быстрые ответы")
         g.SetFont("s10", "Segoe UI")
         g.MarginX := 20
         g.MarginY := 16
@@ -58,10 +66,14 @@ class KweetyApp {
         this.Enabled.OnEvent("Click", (*) => this.SaveOptions())
         this.FastPaste := g.AddCheckbox("x+26 yp", "Вставлять весь текст целиком (Ctrl+V)")
         this.FastPaste.OnEvent("Click", (*) => this.SaveOptions())
+        this.Autostart := g.AddCheckbox("xm y+12", "Запускать при входе в Windows, свернув в трей")
+        this.Autostart.Value := this.Startup.IsEnabled()
+        this.Autostart.OnEvent("Click", (*) => this.SaveStartup())
         g.AddText("xm y+18", "Заменять после нажатия:")
         this.Keys := Map()
-        for key, label in Map("Space", "Пробел", "Enter", "Enter", "Tab", "Tab") {
-            cb := g.AddCheckbox(key = "Space" ? "xm y+10" : "x+24 yp", label)
+        for i, entry in [["Space", "Пробел"], ["Enter", "Enter"], ["Tab", "Tab"]] {
+            key := entry[1], label := entry[2]
+            cb := g.AddCheckbox(i = 1 ? "xm y+10" : "x+24 yp", label)
             cb.OnEvent("Click", (*) => this.SaveOptions())
             this.Keys[key] := cb
         }
@@ -86,6 +98,13 @@ class KweetyApp {
     Show() => this.Window.Show()
 
     SmokeTest() {
+        previousX := -1, rowY := -1
+        for key in ["Space", "Enter", "Tab"] {
+            this.Keys[key].GetPos(&x, &y)
+            if (rowY != -1 && y != rowY) || x <= previousX
+                throw Error("Клавиши замены должны быть в одной строке: Пробел, Enter, Tab.")
+            previousX := x, rowY := y
+        }
         original := this.Config
         testConfig := this.CopyConfig()
         testConfig.Items := []
@@ -182,6 +201,13 @@ class KweetyApp {
             cfg.%name% := cb.Value
         if !this.Persist(cfg)
             this.Refresh()
+    }
+
+    SaveStartup() {
+        try this.Startup.SetEnabled(this.Autostart.Value)
+        catch as err
+            MsgBox("Не удалось изменить автозапуск.`n`n" err.Message, "Kweety", "Iconx")
+        this.Autostart.Value := this.Startup.IsEnabled()
     }
 
     Toggle() {

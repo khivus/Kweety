@@ -1,6 +1,7 @@
 #Requires AutoHotkey v2.0
 #Include ..\lib\Core.ahk
 #Include ..\lib\Paste.ahk
+#Include ..\lib\Startup.ahk
 
 class FakeClipboard {
     Value := "original clipboard"
@@ -149,6 +150,26 @@ try {
     FileDelete(path ".bak")
     SplitPath(path, , &dir)
     DirDelete(dir)
+    startupDir := A_Temp "\Kweety-startup-test-" DllCall("GetCurrentProcessId")
+    DirCreate(startupDir)
+    startupLink := startupDir "\Kweety.lnk"
+    command := KweetyStartup.MakeCommand(false, "C:\Folder With Spaces\Kweety.ahk", A_AhkPath)
+    Assert(command.Target == A_AhkPath, "source startup uses AHK v2 interpreter")
+    Assert(command.Args == '"C:\Folder With Spaces\Kweety.ahk" --background', "source startup quotes path and starts in tray")
+    exeCommand := KweetyStartup.MakeCommand(true, "C:\Folder With Spaces\Kweety.exe", A_AhkPath)
+    Assert(exeCommand.Target == "C:\Folder With Spaces\Kweety.exe" && exeCommand.Args == "--background", "compiled startup starts executable in tray")
+    startup := KweetyStartup(startupLink, command)
+    Assert(!startup.IsEnabled(), "startup initially disabled")
+    startup.SetEnabled(true)
+    FileGetShortcut(startupLink, &target, &workingDir, &args)
+    Assert(startup.IsEnabled() && target == command.Target && args == command.Args, "startup shortcut round trip")
+    Assert(workingDir == command.Directory, "startup working directory retained")
+    startup.SetEnabled(true)
+    Assert(!FileExist(startupLink ".tmp.lnk"), "startup update cleans temporary link")
+    startup.SetEnabled(false)
+    Assert(!startup.IsEnabled(), "startup disable removes only application shortcut")
+    startup.SetEnabled(false)
+    DirDelete(startupDir)
     FileAppend("PASS: " checks " checks`n", "*", "UTF-8")
     ExitApp(0)
 } catch as err {
