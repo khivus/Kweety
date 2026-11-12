@@ -83,26 +83,40 @@ try {
     for batch in batches
         joined .= batch
     Assert(joined == KweetyCore.CompileSend(boundaryText "😀z"), "batching loses no characters")
-    for text in ["a`nb", "a`rb", "a`tb", "a`bb", ""]
-        Assert(!KweetyPaste.CanPaste(text), "control characters use keyboard path")
+    for text in ["a`nb", "a`rb", "a`tb", "a`bb"]
+        Assert(KweetyPaste.CanPaste(text), "multiline and control text uses bulk paste")
+    Assert(!KweetyPaste.CanPaste(""), "empty clipboard payload rejected")
+    Assert(KweetyPaste.ClipboardText("`nа`r`n`rб`n") == "`r`nа`r`n`r`nб`r`n", "all newline styles normalized without losing blank or trailing lines")
+    Assert(KweetyPaste.ClipboardText("{Enter}!^+#`t😀") == "{Enter}!^+#`t😀", "clipboard special symbols remain literal")
+    Assert(KweetyPaste.PasteKeys(3) == "{Backspace 3}^v", "bulk path sends only erase and one paste")
+    Throws(() => KweetyPaste.PasteKeys(0), "invalid erase count rejected")
     clip := FakeClipboard()
     paste := KweetyPaste(clip)
-    Assert(paste.Prepare(literal) = false, "tab-containing literal keeps keyboard path")
+    Assert(paste.Prepare(literal), "tab-containing literal uses bulk paste")
+    Assert(clip.Value == literal, "tab and emoji clipboard content preserved")
     Assert(paste.Prepare("Привет {Enter}!^+#"), "single line fast paste prepared")
     Assert(clip.Value == "Привет {Enter}!^+#", "fast paste content stays literal")
     Assert(paste.Prepare("next expansion") && clip.Captures = 1, "overlapping expansions retain original clipboard")
     Assert(paste.Restore() && clip.Value == "original clipboard", "original clipboard restored")
     Assert(!paste.Pending && paste.Saved == "", "clipboard snapshot released")
+    multiline := "`nПривет`r`n`r{Enter}!^+#😀`n"
+    Assert(paste.Prepare(multiline), "multiline template uses bulk paste")
+    Assert(clip.Value == KweetyPaste.ClipboardText(multiline), "entire multiline template written as one clipboard value")
+    Assert(paste.Restore() && clip.Value == "original clipboard", "clipboard restored after multiline paste")
     paste.Prepare("template")
     clip.Write("user copied this")
     paste.Restore()
     Assert(clip.Value == "user copied this", "new user clipboard never overwritten")
     clip.Busy := true
-    Assert(!paste.Prepare("busy"), "busy clipboard falls back without typing")
+    Assert(!paste.Prepare("busy"), "busy clipboard aborts before typing")
+    Assert(clip.Value == "user copied this", "failed preparation leaves clipboard unchanged")
     clip.Busy := false
     longText := ""
     Loop 12000
         longText .= "Я😀 "
+    Assert(paste.Prepare(longText "`nВторая строка"), "long multiline template accepted for bulk paste")
+    Assert(clip.Value == longText "`r`nВторая строка", "long multiline clipboard content is not truncated")
+    paste.Restore()
     cfg := KweetyStore.Defaults()
     cfg.Items[1].Text := longText "`nВторая строка"
     path := A_Temp "\Kweety-test-" DllCall("GetCurrentProcessId") "\settings.ini"

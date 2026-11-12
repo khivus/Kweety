@@ -3,7 +3,7 @@
 #ClipboardTimeout 50
 ;@Ahk2Exe-SetName Kweety
 ;@Ahk2Exe-SetDescription Kweety - text expansion
-;@Ahk2Exe-SetVersion 0.1.1
+;@Ahk2Exe-SetVersion 0.1.2
 #Include lib\Core.ahk
 #Include lib\Paste.ahk
 
@@ -49,14 +49,14 @@ class KweetyApp {
     }
 
     BuildGui() {
-        g := this.Window := Gui(, "Kweety — быстрые ответы")
+        g := this.Window := Gui(, "Kweety 0.1.2 — быстрые ответы")
         g.SetFont("s10", "Segoe UI")
         g.MarginX := 20
         g.MarginY := 16
         g.AddText("xm w730", "Пишите меньше. Говорите больше.")
         this.Enabled := g.AddCheckbox("xm y+14", "Замена сокращений включена")
         this.Enabled.OnEvent("Click", (*) => this.SaveOptions())
-        this.FastPaste := g.AddCheckbox("x+26 yp", "Быстрая вставка однострочного текста")
+        this.FastPaste := g.AddCheckbox("x+26 yp", "Вставлять весь текст целиком (Ctrl+V)")
         this.FastPaste.OnEvent("Click", (*) => this.SaveOptions())
         g.AddText("xm y+18", "Заменять после нажатия:")
         this.Keys := Map()
@@ -65,7 +65,7 @@ class KweetyApp {
             cb.OnEvent("Click", (*) => this.SaveOptions())
             this.Keys[key] := cb
         }
-        g.AddText("xm y+18 w730 c555555", "Клавиша замены поглощается. Переносы внутри текста — Shift+Enter.")
+        this.ModeHint := g.AddText("xm y+18 w730 c555555", "")
         this.List := g.AddListView("xm y+16 w730 r12 -Multi", ["Сокращение", "В другой раскладке", "Текст"])
         this.List.ModifyCol(1, 130)
         this.List.ModifyCol(2, 170)
@@ -102,6 +102,9 @@ class KweetyApp {
     Refresh() {
         this.Enabled.Value := this.Config.Enabled
         this.FastPaste.Value := this.Config.FastPaste
+        this.ModeHint.Text := this.Config.FastPaste
+            ? "Текст вставляется целиком вместе с переносами. Клавиша замены поглощается."
+            : "Клавиша замены поглощается. Переносы внутри текста — Shift+Enter."
         for name, cb in this.Keys
             cb.Value := this.Config.%name%
         this.List.Delete()
@@ -122,7 +125,7 @@ class KweetyApp {
         endings := (this.Config.Space ? " " : "") (this.Config.Enter ? "`n" : "") (this.Config.Tab ? "`t" : "")
         Hotstring("EndChars", endings)
         for item in this.Config.Items {
-            payload := KweetyCore.CompileBatches(item.Text)
+            payload := this.Config.FastPaste ? [] : KweetyCore.CompileBatches(item.Text)
             for alias in KweetyCore.Aliases(item.Trigger) {
                 ; B0: delete the abbreviation in the SAME send as its replacement.
                 name := ":B0OC1X:" alias
@@ -139,8 +142,12 @@ class KweetyApp {
         Critical("On")
         try {
             SetKeyDelay(-1, -1)
-            if this.Config.FastPaste && this.Paste.Prepare(text) {
-                try SendInput("{Backspace " eraseCount "}^v")
+            if this.Config.FastPaste {
+                if !this.Paste.Prepare(text) {
+                    TrayTip("Не удалось получить буфер обмена. Сокращение осталось на месте; повторите его набор.", "Kweety — вставка не выполнена", 2)
+                    return
+                }
+                try SendInput(KweetyPaste.PasteKeys(eraseCount))
                 finally this.Paste.ScheduleRestore()
             } else {
                 for i, batch in payload
@@ -213,7 +220,7 @@ class KweetyApp {
         editor.AddText("xm y+10 w580 c555555", "Буквы, цифры, _ и -. Вторая раскладка добавится автоматически.")
         editor.AddText("xm y+16", "Текст подстановки")
         body := editor.AddEdit("xm y+6 w580 r12 WantTab WantReturn", original.Text)
-        editor.AddText("xm y+10 w580 c555555", "Здесь Enter создаёт строку. При подстановке она станет Shift+Enter.`nСимволы вроде {Enter}, ! и + вставляются буквально.")
+        editor.AddText("xm y+10 w580 c555555", "Enter создаёт строку. В режиме Ctrl+V переносы вставляются вместе с текстом.`nСимволы вроде {Enter}, ! и + вставляются буквально.")
         close := (*) => this.CloseEditor(editor, trigger, body, original)
         editor.AddButton("xm y+16 w140", "Сохранить").OnEvent("Click", (*) => this.SaveEditor(editor, trigger, body, row))
         editor.AddButton("x+10 w140", "Отмена").OnEvent("Click", close)

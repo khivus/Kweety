@@ -16,7 +16,18 @@ class KweetyPaste {
         this.RestoreCallback := this.Restore.Bind(this)
     }
 
-    static CanPaste(text) => text != "" && !RegExMatch(text, "[\r\n\t\x08]")
+    static CanPaste(text) => text != ""
+
+    static ClipboardText(text) {
+        ; CF_UNICODETEXT uses CRLF. Preserve blank and trailing lines as well.
+        return StrReplace(StrReplace(StrReplace(text, "`r`n", "`n"), "`r", "`n"), "`n", "`r`n")
+    }
+
+    static PasteKeys(eraseCount) {
+        if !IsInteger(eraseCount) || eraseCount < 1 || eraseCount > 40
+            throw Error("Некорректная длина сокращения.")
+        return "{Backspace " eraseCount "}^v"
+    }
 
     Prepare(text) {
         if !KweetyPaste.CanPaste(text)
@@ -25,14 +36,14 @@ class KweetyPaste {
             ; A second expansion must retain the ORIGINAL clipboard, not our text.
             saved := this.Pending && this.Clipboard.Sequence() = this.Expected
                 ? this.Saved : this.Clipboard.Capture()
-            this.Clipboard.Write(text)
+            this.Clipboard.Write(KweetyPaste.ClipboardText(text))
             this.Expected := this.Clipboard.Sequence()
             this.Saved := saved
             this.Pending := true
             this.Retries := 0
             return true
         } catch {
-            return false ; Clipboard busy: fall back before deleting anything.
+            return false ; Leave the abbreviation untouched if the clipboard is busy.
         }
     }
 
