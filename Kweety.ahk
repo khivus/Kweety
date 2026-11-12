@@ -1,9 +1,11 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
+#ClipboardTimeout 50
 ;@Ahk2Exe-SetName Kweety
 ;@Ahk2Exe-SetDescription Kweety - text expansion
 ;@Ahk2Exe-SetVersion 0.1.1
 #Include lib\Core.ahk
+#Include lib\Paste.ahk
 
 SetWorkingDir(A_ScriptDir)
 SendMode("Input")
@@ -28,6 +30,8 @@ class KweetyApp {
     __New() {
         this.Path := A_AppData "\Kweety\settings.ini"
         this.Config := KweetyStore.Load(this.Path)
+        this.Paste := KweetyPaste()
+        OnExit((*) => (this.Paste.Restore(), 0))
         this.Registered := []
         this.Testing := A_Args.Length && A_Args[1] = "--smoke-test"
         this.Condition := (*) => !this.Testing && this.Config.Enabled && !WinActive("ahk_pid " DllCall("GetCurrentProcessId"))
@@ -52,6 +56,8 @@ class KweetyApp {
         g.AddText("xm w730", "Пишите меньше. Говорите больше.")
         this.Enabled := g.AddCheckbox("xm y+14", "Замена сокращений включена")
         this.Enabled.OnEvent("Click", (*) => this.SaveOptions())
+        this.FastPaste := g.AddCheckbox("x+26 yp", "Быстрая вставка однострочного текста")
+        this.FastPaste.OnEvent("Click", (*) => this.SaveOptions())
         g.AddText("xm y+18", "Заменять после нажатия:")
         this.Keys := Map()
         for key, label in Map("Space", "Пробел", "Enter", "Enter", "Tab", "Tab") {
@@ -95,6 +101,7 @@ class KweetyApp {
 
     Refresh() {
         this.Enabled.Value := this.Config.Enabled
+        this.FastPaste.Value := this.Config.FastPaste
         for name, cb in this.Keys
             cb.Value := this.Config.%name%
         this.List.Delete()
@@ -119,7 +126,7 @@ class KweetyApp {
             for alias in KweetyCore.Aliases(item.Trigger) {
                 ; B0: delete the abbreviation in the SAME send as its replacement.
                 name := ":B0OC1X:" alias
-                Hotstring(name, this.Expand.Bind(this, payload, StrLen(alias)), "On")
+                Hotstring(name, this.Expand.Bind(this, payload, StrLen(alias), item.Text), "On")
                 this.Registered.Push(name)
             }
         }
@@ -127,13 +134,18 @@ class KweetyApp {
         Hotstring("Reset")
     }
 
-    Expand(payload, eraseCount, *) {
+    Expand(payload, eraseCount, text, *) {
         ; Prevent a second expansion from interrupting a long template.
         Critical("On")
         try {
             SetKeyDelay(-1, -1)
-            for i, batch in payload
-                SendInput((i = 1 ? "{Backspace " eraseCount "}" : "") batch)
+            if this.Config.FastPaste && this.Paste.Prepare(text) {
+                try SendInput("{Backspace " eraseCount "}^v")
+                finally this.Paste.ScheduleRestore()
+            } else {
+                for i, batch in payload
+                    SendInput((i = 1 ? "{Backspace " eraseCount "}" : "") batch)
+            }
         } finally {
             Hotstring("Reset")
             Critical("Off")
@@ -152,12 +164,13 @@ class KweetyApp {
         return true
     }
 
-    CopyConfig() => {Enabled: this.Config.Enabled, Space: this.Config.Space,
+    CopyConfig() => {Enabled: this.Config.Enabled, FastPaste: this.Config.FastPaste, Space: this.Config.Space,
         Enter: this.Config.Enter, Tab: this.Config.Tab, Items: this.Config.Items.Clone()}
 
     SaveOptions() {
         cfg := this.CopyConfig()
         cfg.Enabled := this.Enabled.Value
+        cfg.FastPaste := this.FastPaste.Value
         for name, cb in this.Keys
             cfg.%name% := cb.Value
         if !this.Persist(cfg)

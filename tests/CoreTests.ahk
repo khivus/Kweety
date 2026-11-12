@@ -1,5 +1,27 @@
 #Requires AutoHotkey v2.0
 #Include ..\lib\Core.ahk
+#Include ..\lib\Paste.ahk
+
+class FakeClipboard {
+    Value := "original clipboard"
+    Serial := 1
+    Captures := 0
+    Busy := false
+    Capture() {
+        if this.Busy
+            throw Error("busy")
+        this.Captures += 1
+        return this.Value
+    }
+    Sequence() => this.Serial
+    Write(value) {
+        if this.Busy
+            throw Error("busy")
+        this.Value := value
+        this.Serial += 1
+    }
+    Restore(value) => this.Write(value)
+}
 
 checks := 0
 Assert(condition, label) {
@@ -61,6 +83,23 @@ try {
     for batch in batches
         joined .= batch
     Assert(joined == KweetyCore.CompileSend(boundaryText "😀z"), "batching loses no characters")
+    for text in ["a`nb", "a`rb", "a`tb", "a`bb", ""]
+        Assert(!KweetyPaste.CanPaste(text), "control characters use keyboard path")
+    clip := FakeClipboard()
+    paste := KweetyPaste(clip)
+    Assert(paste.Prepare(literal) = false, "tab-containing literal keeps keyboard path")
+    Assert(paste.Prepare("Привет {Enter}!^+#"), "single line fast paste prepared")
+    Assert(clip.Value == "Привет {Enter}!^+#", "fast paste content stays literal")
+    Assert(paste.Prepare("next expansion") && clip.Captures = 1, "overlapping expansions retain original clipboard")
+    Assert(paste.Restore() && clip.Value == "original clipboard", "original clipboard restored")
+    Assert(!paste.Pending && paste.Saved == "", "clipboard snapshot released")
+    paste.Prepare("template")
+    clip.Write("user copied this")
+    paste.Restore()
+    Assert(clip.Value == "user copied this", "new user clipboard never overwritten")
+    clip.Busy := true
+    Assert(!paste.Prepare("busy"), "busy clipboard falls back without typing")
+    clip.Busy := false
     longText := ""
     Loop 12000
         longText .= "Я😀 "
@@ -71,11 +110,19 @@ try {
     loaded := KweetyStore.Load(path)
     Assert(loaded.Items[1].Text == cfg.Items[1].Text, "long text persistence beyond INI API limit")
     Assert(loaded.Enter && loaded.Space && !loaded.Tab, "default keys persisted")
+    Assert(loaded.FastPaste, "fast paste defaults on")
     loaded.Tab := 1
     loaded.Enabled := 0
+    loaded.FastPaste := 0
     KweetyStore.Save(path, loaded)
     Assert(FileExist(path ".bak"), "backup created")
     Assert(!KweetyStore.Load(path).Enabled && KweetyStore.Load(path).Tab, "options persisted")
+    Assert(!KweetyStore.Load(path).FastPaste, "fast paste toggle persisted")
+    legacy := StrReplace(FileRead(path), "FastPaste=0`r`n", "")
+    legacyFile := FileOpen(path, "w", "UTF-16")
+    legacyFile.Write(legacy)
+    legacyFile.Close()
+    Assert(KweetyStore.Load(path).FastPaste, "old settings enable fast paste without migration loss")
     loaded.Space := 0
     loaded.Enter := 0
     loaded.Tab := 0

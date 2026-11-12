@@ -116,7 +116,7 @@ class KweetyCore {
 }
 
 class KweetyStore {
-    static Defaults() => {Enabled: 1, Space: 1, Enter: 1, Tab: 0,
+    static Defaults() => {Enabled: 1, FastPaste: 1, Space: 1, Enter: 1, Tab: 0,
         Items: [{Trigger: "fff", Text: "Привет это тестовое сообщение"}]}
 
     static Load(path) {
@@ -152,6 +152,10 @@ class KweetyStore {
                 throw Error("Повреждена настройка: " name)
             cfg.%name% := Integer(value)
         }
+        fastPaste := data["Kweety"].Has("FastPaste") ? this.Read(data, "Kweety", "FastPaste") : "1"
+        if fastPaste != "0" && fastPaste != "1"
+            throw Error("Повреждена настройка: FastPaste")
+        cfg.FastPaste := Integer(fastPaste)
         if !cfg.Space && !cfg.Enter && !cfg.Tab
             throw Error("В настройках не выбрана клавиша замены.")
         count := this.Read(data, "Kweety", "Count")
@@ -181,7 +185,7 @@ class KweetyStore {
         SplitPath(path, , &dir)
         DirCreate(dir)
         content := "[Kweety]`r`nVersion=1`r`nCount=" cfg.Items.Length "`r`n"
-        for name in ["Enabled", "Space", "Enter", "Tab"]
+        for name in ["Enabled", "FastPaste", "Space", "Enter", "Tab"]
             content .= name "=" cfg.%name% "`r`n"
         for i, item in cfg.Items
             content .= "`r`n[Snippet" i "]`r`nTrigger=" item.Trigger "`r`nText=" KweetyCore.Encode(item.Text) "`r`n"
