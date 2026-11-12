@@ -48,6 +48,54 @@ class KweetyCore {
         return result
     }
 
+    ; Compile once when templates change, not while the user is typing.
+    ; Explicit Unicode tokens keep template content out of Send's command syntax.
+    static CompileSend(value) {
+        result := ""
+        for step in this.Plan(value) {
+            if step.Kind = "key" {
+                result .= step.Value
+                continue
+            }
+            Loop Parse step.Value {
+                ch := A_LoopField
+                if ch = "`t"
+                    result .= "{Tab}"
+                else
+                    result .= "{U+" Format("{:04X}", Ord(ch)) "}"
+            }
+        }
+        return result
+    }
+
+    static CompileBatches(value) {
+        batches := [], current := "", count := 0
+        for step in this.Plan(value) {
+            if step.Kind = "key" {
+                if count >= 1000 {
+                    batches.Push(current)
+                    current := "", count := 0
+                }
+                current .= step.Value
+                count += 1
+                continue
+            }
+            Loop Parse step.Value {
+                code := Ord(A_LoopField)
+                ; Keep UTF16 surrogate pairs together at a batch boundary.
+                if count >= 1000 && !(code >= 0xDC00 && code <= 0xDFFF) {
+                    batches.Push(current)
+                    current := "", count := 0
+                }
+                current .= code = 9 ? "{Tab}" : "{U+" Format("{:04X}", code) "}"
+                count += 1
+            }
+        }
+        if current != ""
+            batches.Push(current)
+        return batches
+    }
+
     static Encode(value) {
         buf := Buffer(StrPut(value, "UTF-8"))
         len := StrPut(value, buf, "UTF-8") - 1

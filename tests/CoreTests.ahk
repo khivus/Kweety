@@ -43,6 +43,24 @@ try {
     }
     Assert(breaks = 4, "leading trailing and blank lines preserved")
     Assert(KweetyCore.Plan(literal)[1].Value == literal, "command syntax remains literal")
+    Assert(KweetyCore.CompileSend("AЯ") == "{U+0041}{U+042F}", "compile literal Unicode")
+    Assert(KweetyCore.CompileSend("a`r`n`nb`n") == "{U+0061}+{Enter}+{Enter}{U+0062}+{Enter}", "compiled line endings are Shift+Enter")
+    Assert(KweetyCore.CompileSend("`t") == "{Tab}", "tab compatibility")
+    encoded := KweetyCore.CompileSend("{Enter}!^+#")
+    Assert(!InStr(encoded, "{Enter}"), "literal Enter cannot become a key")
+    Assert(!InStr(encoded, "!^+#"), "literal modifiers cannot become shortcuts")
+    Assert(KweetyCore.CompileSend("😀") == "{U+D83D}{U+DE00}", "emoji UTF16 surrogate pair preserved")
+    Assert(KweetyCore.CompileBatches("a`nб")[1] == KweetyCore.CompileSend("a`nб"), "short template is a single batch")
+    boundaryText := ""
+    Loop 999
+        boundaryText .= "a"
+    batches := KweetyCore.CompileBatches(boundaryText "😀z")
+    Assert(batches.Length = 2, "long template bounded batches")
+    Assert(SubStr(batches[1], -16) == "{U+D83D}{U+DE00}", "surrogate pair stays in one batch")
+    joined := ""
+    for batch in batches
+        joined .= batch
+    Assert(joined == KweetyCore.CompileSend(boundaryText "😀z"), "batching loses no characters")
     longText := ""
     Loop 12000
         longText .= "Я😀 "

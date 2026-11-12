@@ -2,11 +2,13 @@
 #SingleInstance Force
 ;@Ahk2Exe-SetName Kweety
 ;@Ahk2Exe-SetDescription Kweety - text expansion
-;@Ahk2Exe-SetVersion 0.1.0
+;@Ahk2Exe-SetVersion 0.1.1
 #Include lib\Core.ahk
 
 SetWorkingDir(A_ScriptDir)
 SendMode("Input")
+; SendInput can fall back to SendEvent when another AHK keyboard hook is present.
+SetKeyDelay(-1, -1)
 SetTitleMatchMode(2)
 try {
     app := KweetyApp()
@@ -27,7 +29,8 @@ class KweetyApp {
         this.Path := A_AppData "\Kweety\settings.ini"
         this.Config := KweetyStore.Load(this.Path)
         this.Registered := []
-        this.Condition := (*) => this.Config.Enabled && !WinActive("ahk_pid " DllCall("GetCurrentProcessId"))
+        this.Testing := A_Args.Length && A_Args[1] = "--smoke-test"
+        this.Condition := (*) => !this.Testing && this.Config.Enabled && !WinActive("ahk_pid " DllCall("GetCurrentProcessId"))
         this.BuildGui()
         this.Apply()
         A_TrayMenu.Delete()
@@ -112,9 +115,11 @@ class KweetyApp {
         endings := (this.Config.Space ? " " : "") (this.Config.Enter ? "`n" : "") (this.Config.Tab ? "`t" : "")
         Hotstring("EndChars", endings)
         for item in this.Config.Items {
+            payload := KweetyCore.CompileBatches(item.Text)
             for alias in KweetyCore.Aliases(item.Trigger) {
-                name := ":OC1X:" alias
-                Hotstring(name, this.Expand.Bind(this, item.Text), "On")
+                ; B0: delete the abbreviation in the SAME send as its replacement.
+                name := ":B0OC1X:" alias
+                Hotstring(name, this.Expand.Bind(this, payload, StrLen(alias)), "On")
                 this.Registered.Push(name)
             }
         }
@@ -122,16 +127,13 @@ class KweetyApp {
         Hotstring("Reset")
     }
 
-    Expand(text, *) {
+    Expand(payload, eraseCount, *) {
         ; Prevent a second expansion from interrupting a long template.
         Critical("On")
         try {
-            for step in KweetyCore.Plan(text) {
-                if step.Kind = "text"
-                    SendText(step.Value)
-                else
-                    SendInput(step.Value)
-            }
+            SetKeyDelay(-1, -1)
+            for i, batch in payload
+                SendInput((i = 1 ? "{Backspace " eraseCount "}" : "") batch)
         } finally {
             Hotstring("Reset")
             Critical("Off")
