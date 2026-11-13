@@ -574,11 +574,13 @@ class KweetyApp {
             preferences := {Keys: Map(), Excluded: [], Startup: -1, Summary: "Настройки не прочитаны: " err.Message}
         dialog := Gui("+Owner" this.Window.Hwnd, "Предпросмотр импорта Punto")
         dialog.SetFont("s10", "Segoe UI")
-        dialog.AddText("w720", "Будет добавлено: " result.Added ". Пропущено: " result.Skipped.Length ".`nСуществующие шаблоны и файлы Punto не изменяются.")
+        dialog.AddText("w720", "Будет добавлено: " result.Added ". Пропущено: " result.Skipped.Length ".`n"
+            . (result.RemovedStarter ? "Стандартный тестовый шаблон будет удалён. " : "")
+            . "Ваши шаблоны и файлы Punto не изменяются.")
         preview := dialog.AddListView("xm y+12 w720 r7", ["Сокращение", "Текст"])
         preview.ModifyCol(1, 140), preview.ModifyCol(2, 550)
         Loop result.Added {
-            item := result.Items[this.Config.Items.Length + A_Index]
+            item := result.Items[result.Items.Length - result.Added + A_Index]
             preview.Add(, item.Trigger, SubStr(StrReplace(StrReplace(item.Text, "`r"), "`n", " ↵ "), 1, 180))
         }
         issues := ""

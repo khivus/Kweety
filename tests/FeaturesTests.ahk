@@ -111,6 +111,30 @@ try {
     Verify(imported[1].Text == "Привет`nмир😀", "PSRF multiline Unicode decoding")
     merge := KweetyPunto.Merge([{Trigger: "яя", Text: "Existing"}], imported)
     Verify(merge.Added = 1 && merge.Skipped.Length = 1, "import conflicts across layouts do not overwrite")
+    starter := KweetyStore.Defaults().Items
+    merge := KweetyPunto.Merge(starter, imported)
+    Verify(merge.RemovedStarter = 1 && merge.Added = 2 && merge.Items.Length = 2, "import replaces demo and counts only incoming templates")
+    Verify(starter.Length = 1 && starter[1].Text == "тестовый текст", "preview leaves current templates intact for cancellation")
+    merge := KweetyPunto.Merge(starter, [{Trigger: "ааа", Text: "Imported replacement"}])
+    Verify(merge.Added = 1 && !merge.Skipped.Length && merge.Items[1].Text == "Imported replacement", "demo aliases do not block Punto templates")
+    merge := KweetyPunto.Merge([{Trigger: "fff", Text: "Custom text"}], [{Trigger: "ааа", Text: "Incoming"}])
+    Verify(!merge.RemovedStarter && !merge.Added && merge.Skipped.Length = 1, "customized demo is preserved and conflicts still apply")
+    merge := KweetyPunto.Merge([{Trigger: "fff", Text: "тестовый текст", Rtf: "custom formatting"}], imported)
+    Verify(!merge.RemovedStarter && merge.Items.Length = 3, "formatted demo is user content")
+    merge := KweetyPunto.Merge([{Trigger: "fff", Text: "Привет это тестовое сообщение"}], imported)
+    Verify(merge.RemovedStarter = 1 && merge.Added = 2, "legacy demo removed during import")
+    merge := KweetyPunto.Merge(starter, [])
+    Verify(merge.Items.Length = 0 && merge.Added = 0, "empty import has no negative added count")
+    cfg := KweetyStore.Defaults()
+    cfg.Items := merge.Items
+    persistencePath := A_Temp "\Kweety-import-" A_TickCount ".ini"
+    try {
+        KweetyStore.Save(persistencePath, cfg)
+        Verify(KweetyStore.Load(persistencePath).Items.Length = 0, "removed demo does not reappear after restart")
+    } finally {
+        if FileExist(persistencePath)
+            FileDelete(persistencePath)
+    }
     bad := Buffer(4, 0)
     Reject(() => KweetyPunto.Decode(bad), "unknown Punto format rejected")
     raw := FileRead(fixture, "RAW")

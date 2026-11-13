@@ -47,7 +47,18 @@ class KweetyPunto {
     }
 
     static Merge(existing, incoming) {
-        merged := existing.Clone(), skipped := []
+        merged := [], skipped := [], removedStarter := 0, added := 0
+        for item in existing {
+            ; Ignore only the untouched demo, before checking imported aliases.
+            if (StrLower(item.Trigger) = "fff" || StrLower(item.Trigger) = "ааа")
+                && (item.Text == "тестовый текст" || item.Text == "Привет это тестовое сообщение")
+                && (!item.HasOwnProp("Rtf") || item.Rtf = "")
+                && (!item.HasOwnProp("Html") || item.Html = "") {
+                removedStarter += 1
+                continue
+            }
+            merged.Push(item)
+        }
         for item in incoming {
             candidate := merged.Clone()
             candidate.Push(item)
@@ -56,10 +67,11 @@ class KweetyPunto {
                 if candidate.Length > 1000
                     throw Error("Достигнут предел 1000 шаблонов.")
                 merged := candidate
+                added += 1
             } catch as err
                 skipped.Push(item.Trigger ": " err.Message)
         }
-        return {Items: merged, Added: merged.Length - existing.Length, Skipped: skipped}
+        return {Items: merged, Added: added, RemovedStarter: removedStarter, Skipped: skipped}
     }
 
     static Find() {
