@@ -3,7 +3,7 @@
 #ClipboardTimeout 250
 ;@Ahk2Exe-SetName Kweety
 ;@Ahk2Exe-SetDescription Kweety - text expansion
-;@Ahk2Exe-SetVersion 0.2.2
+;@Ahk2Exe-SetVersion 0.3.0
 #Include lib\Core.ahk
 #Include lib\Paste.ahk
 #Include lib\Startup.ahk
@@ -75,7 +75,7 @@ class KweetyApp {
     }
 
     BuildGui() {
-        g := this.Window := Gui(, "Kweety 0.2.2 — быстрые ответы")
+        g := this.Window := Gui(, "Kweety 0.3.0 — быстрые ответы")
         g.SetFont("s10", "Segoe UI")
         g.MarginX := 20
         g.MarginY := 16
