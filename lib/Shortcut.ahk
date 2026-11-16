@@ -12,7 +12,7 @@ class KweetyShortcut {
         for symbol in ["^", "!", "+", "#"]
             if InStr(parts[1], symbol)
                 modifiers .= symbol
-        key := StrLower(parts[2])
+        key := StrLower(GetKeyName(parts[2]))
         if !GetKeyVK(key) && !GetKeySC(key)
             throw Error("Неизвестная клавиша: " parts[2])
         if RegExMatch(key, "i)^(l|r)?(control|ctrl|alt|shift|win)$")

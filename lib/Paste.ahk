@@ -81,6 +81,17 @@ class KweetyPaste {
     }
 
     Prepare(text, rtf := "", html := "") {
+        ; Mail/browser processes can hold the clipboard briefly during input.
+        Loop 5 {
+            if this.TryPrepare(text, rtf, html)
+                return true
+            if A_Index < 5
+                Sleep(25)
+        }
+        return false
+    }
+
+    TryPrepare(text, rtf := "", html := "") {
         if !KweetyPaste.CanPaste(text)
             return false
         wroteClipboard := false
@@ -120,7 +131,7 @@ class KweetyPaste {
     ScheduleRestore() {
         ; Let Discord and other asynchronous paste handlers read the clipboard.
         ; This is a timer, NOT a blocking sleep on the expansion path.
-        SetTimer(this.RestoreCallback, -500)
+        SetTimer(this.RestoreCallback, -2000)
     }
 
     Restore(*) {

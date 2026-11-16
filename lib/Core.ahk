@@ -63,7 +63,7 @@ class KweetyCore {
             Loop Parse step.Value {
                 ch := A_LoopField
                 if ch = "`t"
-                    result .= "{Tab}"
+                    result .= "{U+0009}"
                 else
                     result .= "{U+" Format("{:04X}", Ord(ch)) "}"
             }
@@ -75,7 +75,7 @@ class KweetyCore {
         batches := [], current := "", count := 0
         for step in this.Plan(value) {
             if step.Kind = "key" {
-                if count >= 1000 {
+                if count >= 128 {
                     batches.Push(current)
                     current := "", count := 0
                 }
@@ -86,11 +86,11 @@ class KweetyCore {
             Loop Parse step.Value {
                 code := Ord(A_LoopField)
                 ; Keep UTF16 surrogate pairs together at a batch boundary.
-                if count >= 1000 && !(code >= 0xDC00 && code <= 0xDFFF) {
+                if count >= 128 && !(code >= 0xDC00 && code <= 0xDFFF) {
                     batches.Push(current)
                     current := "", count := 0
                 }
-                current .= code = 9 ? "{Tab}" : "{U+" Format("{:04X}", code) "}"
+                current .= "{U+" Format("{:04X}", code) "}"
                 count += 1
             }
         }

@@ -1,6 +1,6 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
-#ClipboardTimeout 50
+#ClipboardTimeout 250
 ;@Ahk2Exe-SetName Kweety
 ;@Ahk2Exe-SetDescription Kweety - text expansion
 ;@Ahk2Exe-SetVersion 0.2.2
@@ -131,6 +131,9 @@ class KweetyApp {
         }
         original := this.Config
         testConfig := this.CopyConfig()
+        testConfig.LayoutKey := "^+f"
+        testConfig.CaseKey := "^!F8"
+        testConfig.MenuKey := "#+F9"
         testConfig.Items := []
         Loop Parse "йцукенгшщзхъфывапролджэячсмитьбюё"
             testConfig.Items.Push({Trigger: A_LoopField, Text: "Тест`n{Enter}"})
@@ -222,8 +225,6 @@ class KweetyApp {
             key := KweetyShortcut.Normalize(this.Config.%property%)
             if key = ""
                 continue
-            if !RegExMatch(key, "[!^#]") && !RegExMatch(key, "i)^(F([1-9]|1[0-9]|2[0-4])|Pause|ScrollLock)$")
-                throw Error("Для горячих клавиш используйте Ctrl или Alt, либо отдельную функциональную клавишу F1–F24.")
             if used.Has(StrLower(key))
                 throw Error("Горячие клавиши не должны совпадать.")
             used[StrLower(key)] := true
@@ -239,23 +240,55 @@ class KweetyApp {
         ; Prevent a second expansion from interrupting a long template.
         Critical("On")
         try {
-            SetKeyDelay(-1, -1)
+            target := WinExist("A")
+            if !this.WaitForInput(target)
+                return
             rich := item.HasOwnProp("Rtf") && item.Rtf != ""
-            if this.Config.FastPaste || rich {
+            if this.Config.FastPaste {
                 if !this.Paste.Prepare(item.Text, rich ? item.Rtf : "", item.HasOwnProp("Html") ? item.Html : "") {
                     TrayTip("Не удалось получить буфер обмена. Сокращение осталось на месте; повторите его набор.", "Kweety — вставка не выполнена", 2)
                     return
                 }
-                try SendInput(eraseCount ? KweetyPaste.PasteKeys(eraseCount) : "^v")
+                try {
+                    if !WinActive("ahk_id " target)
+                        return
+                    ; Let the editor finish removing the trigger before pasting.
+                    SetKeyDelay(10, 10)
+                    if eraseCount {
+                        SendEvent("{Backspace " eraseCount "}")
+                        Sleep(60)
+                    }
+                    if WinActive("ahk_id " target)
+                        SendEvent("^v")
+                }
                 finally this.Paste.ScheduleRestore()
             } else {
-                for i, batch in payload
-                    SendInput((i = 1 ? "{Backspace " eraseCount "}" : "") batch)
+                ; This path must never use the clipboard, even for rich templates.
+                ; Pace ordinary keys and yield between Unicode batches.
+                SetKeyDelay(0, 10)
+                if eraseCount {
+                    SendEvent("{Backspace " eraseCount "}")
+                    Sleep(40)
+                }
+                for batch in payload {
+                    if !WinActive("ahk_id " target)
+                        break
+                    SendEvent(batch)
+                    Sleep(10)
+                }
             }
         } finally {
             Hotstring("Reset")
             Critical("Off")
         }
+    }
+
+    WaitForInput(target) {
+        ; Do not paste with a still-held Shift/Alt/trigger key from the shortcut.
+        for key in ["Ctrl", "Alt", "Shift", "LWin", "RWin", "Space", "Enter", "Tab"]
+            if !KeyWait(key, "T1")
+                return false
+        return target && WinActive("ahk_id " target)
     }
 
     Persist(cfg) {
@@ -435,14 +468,25 @@ class KweetyApp {
         Critical("On")
         recoverClipboard := false
         try {
+            target := WinExist("A")
+            if !this.WaitForInput(target)
+                return
+            SetKeyDelay(10, 10)
             if !this.Paste.Restore()
                 return
             snapshot := ClipboardAll()
             recoverClipboard := true
             A_Clipboard := ""
-            SendInput("^c")
+            SendEvent("^c")
             if !ClipWait(0.15) {
-                SendInput("^+{Left}^c")
+                SendEvent("^+{Left}")
+                Sleep(60)
+                if !WinActive("ahk_id " target) {
+                    A_Clipboard := snapshot
+                    recoverClipboard := false
+                    return
+                }
+                SendEvent("^c")
                 if !ClipWait(0.3) {
                     A_Clipboard := snapshot
                     recoverClipboard := false
@@ -454,7 +498,10 @@ class KweetyApp {
             recoverClipboard := false
             replacement := kind = "layout" ? KweetyText.Layout(text) : KweetyText.Case(text)
             if this.Paste.Prepare(replacement) {
-                try SendInput("^v")
+                try {
+                    if WinActive("ahk_id " target)
+                        SendEvent("^v")
+                }
                 finally this.Paste.ScheduleRestore()
             } else
                 this.Paste.Restore()

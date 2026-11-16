@@ -10,6 +10,7 @@ class FakeClipboard {
     Serial := 1
     Captures := 0
     Busy := false
+    FailWrites := 0
     Capture() {
         if this.Busy
             throw Error("busy")
@@ -18,6 +19,10 @@ class FakeClipboard {
     }
     Sequence() => this.Serial
     Write(value) {
+        if this.FailWrites > 0 {
+            this.FailWrites -= 1
+            throw Error("temporarily busy")
+        }
         if this.Busy
             throw Error("busy")
         this.Value := value
@@ -70,14 +75,14 @@ try {
     Assert(KweetyCore.Plan(literal)[1].Value == literal, "command syntax remains literal")
     Assert(KweetyCore.CompileSend("AЯ") == "{U+0041}{U+042F}", "compile literal Unicode")
     Assert(KweetyCore.CompileSend("a`r`n`nb`n") == "{U+0061}+{Enter}+{Enter}{U+0062}+{Enter}", "compiled line endings are Shift+Enter")
-    Assert(KweetyCore.CompileSend("`t") == "{Tab}", "tab compatibility")
+    Assert(KweetyCore.CompileSend("`t") == "{U+0009}", "tab is text rather than focus navigation")
     encoded := KweetyCore.CompileSend("{Enter}!^+#")
     Assert(!InStr(encoded, "{Enter}"), "literal Enter cannot become a key")
     Assert(!InStr(encoded, "!^+#"), "literal modifiers cannot become shortcuts")
     Assert(KweetyCore.CompileSend("😀") == "{U+D83D}{U+DE00}", "emoji UTF16 surrogate pair preserved")
     Assert(KweetyCore.CompileBatches("a`nб")[1] == KweetyCore.CompileSend("a`nб"), "short template is a single batch")
     boundaryText := ""
-    Loop 999
+    Loop 127
         boundaryText .= "a"
     batches := KweetyCore.CompileBatches(boundaryText "😀z")
     Assert(batches.Length = 2, "long template bounded batches")
@@ -114,6 +119,9 @@ try {
     Assert(!paste.Prepare("busy"), "busy clipboard aborts before typing")
     Assert(clip.Value == "user copied this", "failed preparation leaves clipboard unchanged")
     clip.Busy := false
+    clip.FailWrites := 2
+    Assert(paste.Prepare("retry success"), "transient clipboard locks are retried")
+    Assert(paste.Restore() && clip.Value == "user copied this", "retry retains original clipboard")
     longText := ""
     Loop 12000
         longText .= "Я😀 "

@@ -26,6 +26,7 @@ try {
     Verify(KweetyShortcut.Normalize("+^F") == "^+f", "Ctrl Shift F accepted and canonicalized")
     Verify(KweetyShortcut.Normalize("!^f") == KweetyShortcut.Normalize("^!F"), "modifier order does not bypass duplicate detection")
     Verify(KweetyShortcut.Normalize("#f8") == "#f8", "Windows modifier supported")
+    Verify(KweetyShortcut.Normalize("^Esc") == KweetyShortcut.Normalize("^Escape"), "key aliases canonicalized for duplicate detection")
     Reject(() => KweetyShortcut.Normalize("+f"), "Shift alone cannot replace ordinary typing")
     Reject(() => KweetyShortcut.Normalize("^Ctrl"), "modifier cannot be the main key")
     shortcutGui := Gui()
