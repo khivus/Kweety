@@ -10,6 +10,7 @@
 #Include lib\TextTools.ahk
 #Include lib\Punto.ahk
 #Include lib\Rich.ahk
+#Include lib\Shortcut.ahk
 
 SetWorkingDir(A_ScriptDir)
 SendMode("Input")
@@ -216,7 +217,7 @@ class KweetyApp {
         }
         used := Map()
         for kind, property in Map("layout", "LayoutKey", "case", "CaseKey", "menu", "MenuKey") {
-            key := this.Config.%property%
+            key := KweetyShortcut.Normalize(this.Config.%property%)
             if key = ""
                 continue
             if !RegExMatch(key, "[!^#]") && !RegExMatch(key, "i)^(F([1-9]|1[0-9]|2[0-4])|Pause|ScrollLock)$")
@@ -473,7 +474,7 @@ class KweetyApp {
         controls := Map()
         for property, label in Map("LayoutKey", "Исправить раскладку выделения / последнего слова", "CaseKey", "Сменить регистр выделения / последнего слова", "MenuKey", "Открыть поиск шаблонов") {
             dialog.AddText("xm y+12 w500", label)
-            controls[property] := dialog.AddHotkey("xm y+6 w260", this.Config.%property%)
+            controls[property] := KweetyShortcut(dialog, this.Config.%property%)
         }
         dialog.AddText("xm y+16 w540", "Программы-исключения: имя EXE или полный путь, по одному в строке.`nВ них отключаются и сокращения, и горячие клавиши Kweety.")
         rules := ""
@@ -493,8 +494,13 @@ class KweetyApp {
 
     SaveSettings(controls, excluded, close) {
         cfg := this.CopyConfig()
-        for property, control in controls
-            cfg.%property% := control.Value
+        try {
+            for property, control in controls
+                cfg.%property% := control.Value
+        } catch as err {
+            MsgBox(err.Message, "Горячие клавиши", "Icon!")
+            return
+        }
         cfg.Excluded := []
         for rule in StrSplit(excluded.Value, "`n", "`r")
             if Trim(rule) != ""

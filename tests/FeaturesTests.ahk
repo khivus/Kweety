@@ -5,6 +5,7 @@
 #Include ..\lib\Punto.ahk
 #Include ..\lib\Paste.ahk
 #Include ..\lib\Rich.ahk
+#Include ..\lib\Shortcut.ahk
 
 count := 0
 Verify(value, message) {
@@ -21,6 +22,17 @@ Reject(call, message) {
     Verify(failed, message)
 }
 try {
+    Verify(KweetyShortcut.Normalize("+^F") == "^+f", "Ctrl Shift F accepted and canonicalized")
+    Verify(KweetyShortcut.Normalize("!^f") == KweetyShortcut.Normalize("^!F"), "modifier order does not bypass duplicate detection")
+    Verify(KweetyShortcut.Normalize("#f8") == "#f8", "Windows modifier supported")
+    Reject(() => KweetyShortcut.Normalize("+f"), "Shift alone cannot replace ordinary typing")
+    Reject(() => KweetyShortcut.Normalize("^Ctrl"), "modifier cannot be the main key")
+    shortcutGui := Gui()
+    shortcut := KweetyShortcut(shortcutGui, "^+f")
+    Verify(shortcut.Value == "^+f", "explicit modifier controls round trip Ctrl Shift F")
+    shortcut.Clear()
+    Verify(shortcut.Value == "", "shortcut can be disabled")
+    shortcutGui.Destroy()
     Verify(KweetyText.Layout("Ghbdtn, vbh!") == "Приветб мир!", "layout conversion preserves typed case and key positions")
     Verify(KweetyText.Layout("привет") == "ghbdtn", "reverse layout")
     Verify(KweetyText.Layout("ЖЭБЮЁ") == ':"<>~', "shifted punctuation layout conversion")
