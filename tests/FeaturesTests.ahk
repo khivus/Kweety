@@ -6,6 +6,7 @@
 #Include ..\lib\Paste.ahk
 #Include ..\lib\Rich.ahk
 #Include ..\lib\Shortcut.ahk
+#Include ..\lib\Layout.ahk
 
 count := 0
 Verify(value, message) {
@@ -33,6 +34,19 @@ try {
     shortcut.Clear()
     Verify(shortcut.Value == "", "shortcut can be disabled")
     shortcutGui.Destroy()
+    layoutGui := Gui()
+    area := layoutGui.AddEdit("w540 h160")
+    footer := layoutGui.AddButton("xm y+10 w140", "Save")
+    layout := KweetyLayout.Enable(layoutGui, area)
+    footer.GetPos(, &footerY)
+    layout.Resize(layoutGui, 0, layout.Width + 200, layout.Height + 100)
+    area.GetPos(, , &areaW, &areaH)
+    footer.GetPos(, &movedY)
+    Verify(areaW = 740 && areaH = 260 && movedY = footerY + 100, "resize grows content and anchors footer")
+    layout.Resize(layoutGui, 0, layout.Width, layout.Height - 80)
+    area.GetPos(, , &areaW, &areaH)
+    Verify(areaW = 540 && areaH = 80, "resize can shrink workspace without accumulated drift")
+    layoutGui.Destroy()
     Verify(KweetyText.Layout("Ghbdtn, vbh!") == "Приветб мир!", "layout conversion preserves typed case and key positions")
     Verify(KweetyText.Layout("привет") == "ghbdtn", "reverse layout")
     Verify(KweetyText.Layout("ЖЭБЮЁ") == ':"<>~', "shifted punctuation layout conversion")

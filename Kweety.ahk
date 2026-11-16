@@ -11,6 +11,7 @@
 #Include lib\Punto.ahk
 #Include lib\Rich.ahk
 #Include lib\Shortcut.ahk
+#Include lib\Layout.ahk
 
 SetWorkingDir(A_ScriptDir)
 SendMode("Input")
@@ -114,6 +115,7 @@ class KweetyApp {
         g.AddButton("x+10 w140", "Импорт Punto").OnEvent("Click", (*) => this.ImportPunto())
         g.OnEvent("Close", (*) => g.Hide())
         g.OnEvent("Escape", (*) => g.Hide())
+        KweetyLayout.Enable(g, this.List)
         this.Refresh()
     }
 
@@ -347,6 +349,7 @@ class KweetyApp {
         editor.OnEvent("Close", close)
         editor.OnEvent("Escape", close)
         this.Window.Opt("+Disabled")
+        KweetyLayout.Enable(editor, body.Control)
         editor.Show(this.Testing ? "Hide" : "")
         if !this.Testing
             trigger.Focus()
@@ -488,6 +491,7 @@ class KweetyApp {
         dialog.OnEvent("Close", close)
         dialog.OnEvent("Escape", close)
         this.Window.Opt("+Disabled")
+        KweetyLayout.Enable(dialog, excluded)
         dialog.Show(this.Testing ? "Hide" : "")
         return dialog
     }
@@ -536,6 +540,7 @@ class KweetyApp {
         popup.OnEvent("Escape", (*) => popup.Destroy())
         popup.OnEvent("Close", (*) => popup.Destroy())
         fill.Call()
+        KweetyLayout.Enable(popup, list)
         popup.Show(this.Testing ? "Hide" : "")
         if !this.Testing
             search.Focus()
@@ -603,6 +608,7 @@ class KweetyApp {
         dialog.AddButton("x+10 w140", "Отмена").OnEvent("Click", close)
         dialog.OnEvent("Close", close), dialog.OnEvent("Escape", close)
         this.Window.Opt("+Disabled")
+        KweetyLayout.Enable(dialog, preview)
         dialog.Show()
     }
 
