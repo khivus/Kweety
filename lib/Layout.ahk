@@ -41,5 +41,9 @@ class KweetyLayout {
                 item.Control.ModifyCol(count, Max(80, remaining))
             }
         }
+        ; Moving static controls can leave their old text painted on the parent.
+        ; Erase and repaint the entire client area and all children together.
+        DllCall("RedrawWindow", "Ptr", window.Hwnd, "Ptr", 0, "Ptr", 0,
+            "UInt", 0x185) ; INVALIDATE | ERASE | ALLCHILDREN | UPDATENOW
     }
 }
