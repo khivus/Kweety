@@ -1,4 +1,4 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 
 ; Compose shortcuts explicitly: the user need not hold modifiers while editing.
 class KweetyShortcut {
@@ -23,42 +23,57 @@ class KweetyShortcut {
     }
 
     __New(dialog, value) {
-        this.Modifiers := Map()
-        for index, entry in [["^", "Ctrl"], ["!", "Alt"], ["+", "Shift"], ["#", "Win"]] {
-            control := dialog.AddCheckbox(index = 1 ? "xm y+6 w60" : "x+8 yp w60", entry[2])
-            control.Value := InStr(value, entry[1]) > 0
-            this.Modifiers[entry[1]] := control
+        this.Recorded := value
+        this.Field := dialog.AddButton("xm y+6 w400", this.Label())
+        this.Field.OnEvent("Click", (*) => this.Record())
+        dialog.AddButton("x+8 yp w90", "Очистить").OnEvent("Click", (*) => this.Clear())
+    }
+
+    Label() {
+        label := ""
+        for entry in [["^", "Ctrl+"], ["!", "Alt+"], ["+", "Shift+"], ["#", "Win+"]]
+            if InStr(this.Recorded, entry[1])
+                label .= entry[2]
+        label .= RegExReplace(this.Recorded, "^[\^!+#]+")
+        return label = "" ? "Нажмите и введите сочетание…" : label
+    }
+
+    Record() {
+        this.Field.Text := "Нажмите сочетание (Esc — отмена)…"
+        hook := InputHook("T10")
+        hook.KeyOpt("{All}", "NS")
+        hook.OnKeyDown := this.Capture.Bind(this)
+        hook.Start()
+        hook.Wait()
+        this.Field.Text := this.Label()
+    }
+
+    Capture(hook, vk, sc) {
+        key := GetKeyName(Format("vk{:02X}sc{:03X}", vk, sc))
+        if RegExMatch(key, "i)^(L|R)?(Control|Ctrl|Alt|Shift|Win)$")
+            return
+        if key = "Escape" {
+            hook.Stop()
+            return
         }
-        keys := [""]
-        Loop 26
-            keys.Push(Chr(64 + A_Index))
-        Loop 10
-            keys.Push(String(A_Index - 1))
-        Loop 24
-            keys.Push("F" A_Index)
-        for key in ["Space", "Tab", "Enter", "Insert", "Home", "End", "PgUp", "PgDn", "Pause", "ScrollLock"]
-            keys.Push(key)
-        this.Key := dialog.AddComboBox("x+10 yp-3 w180", keys)
-        this.Key.Text := RegExReplace(value, "^[\^!+#]+")
-        dialog.AddButton("x+8 yp w75", "Очистить").OnEvent("Click", (*) => this.Clear())
+        modifiers := ""
+        for name, symbol in Map("Ctrl", "^", "Alt", "!", "Shift", "+", "LWin", "#", "RWin", "#")
+            if GetKeyState(name, "P") && !InStr(modifiers, symbol)
+                modifiers .= symbol
+        try this.Recorded := KweetyShortcut.Normalize(modifiers key)
+        catch {
+            this.Field.Text := "Нужен Ctrl, Alt, Win или F1–F24…"
+            return
+        }
+        hook.Stop()
     }
 
     Value {
-        get {
-            key := Trim(this.Key.Text)
-            if key = ""
-                return ""
-            modifiers := ""
-            for symbol in ["^", "!", "+", "#"]
-                if this.Modifiers[symbol].Value
-                    modifiers .= symbol
-            return KweetyShortcut.Normalize(modifiers key)
-        }
+        get => KweetyShortcut.Normalize(this.Recorded)
     }
 
     Clear() {
-        this.Key.Text := ""
-        for symbol, control in this.Modifiers
-            control.Value := 0
+        this.Recorded := ""
+        this.Field.Text := this.Label()
     }
 }

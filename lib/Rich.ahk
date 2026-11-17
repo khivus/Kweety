@@ -1,4 +1,4 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 
 class KweetyRich {
     static Escape(text) => StrReplace(StrReplace(StrReplace(StrReplace(text, "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), '"', "&quot;")
@@ -39,6 +39,13 @@ class KweetyRich {
             plain .= run.Text
         }
         return {Text: plain, Rtf: "{\rtf1\ansi\deff0\uc1{\fonttbl{\f0 Segoe UI;}}{\colortbl;" table "}\f0\fs20 " body "}", Html: '<div style="white-space:pre-wrap">' html '</div>'}
+    }
+
+    static Preview(item) {
+        runs := this.HtmlRuns(item.Html)
+        for run in runs
+            run.Text := StrReplace(StrReplace(StrReplace(run.Text, "`r`n", "`n"), "`r", "`n"), "`n", " ↵ ")
+        return this.FromRuns(runs)
     }
 
     static ClipboardHtml(fragment) {
@@ -279,5 +286,63 @@ class KweetyRichEdit {
         } else
             SendMessage(0x302, 0, 0, this.Hwnd) ; Native RTF/plain paste.
         this.Focus()
+    }
+}
+
+; Paint rich text directly into the text column using the native RichEdit renderer.
+class KweetyTablePreview {
+    __New(gui, list, app) {
+        this.App := app
+        this.Cache := Map()
+        this.Renderer := KweetyRichEdit(gui, "Hidden x0 y0 w1 h1", {Text: ""})
+        list.OnNotify(-12, this.Draw.Bind(this)) ; NM_CUSTOMDRAW
+    }
+
+    Draw(list, data) {
+        stage := NumGet(data, A_PtrSize = 8 ? 24 : 12, "UInt")
+        if stage = 1 || stage = 0x10001
+            return 0x20 ; request item / subitem notifications
+        if stage != 0x30001 || NumGet(data, A_PtrSize = 8 ? 88 : 56, "Int") != 2
+            return
+        index := NumGet(data, A_PtrSize = 8 ? 56 : 36, "UPtr") + 1
+        if index > this.App.VisibleItems.Length
+            return
+        item := this.App.Config.Items[this.App.VisibleItems[index]]
+        if !item.HasOwnProp("Formatting") || !item.Formatting || !item.HasOwnProp("Rtf") || item.Rtf = ""
+            return
+        dc := NumGet(data, A_PtrSize = 8 ? 32 : 16, "Ptr")
+        rect := Buffer(16, 0)
+        NumPut("Int", 2, rect, 4) ; text subitem
+        SendMessage(0x1038, index - 1, rect, list.Hwnd) ; LVM_GETSUBITEMRECT
+        left := NumGet(rect, 0, "Int"), top := NumGet(rect, 4, "Int")
+        right := NumGet(rect, 8, "Int"), bottom := NumGet(rect, 12, "Int")
+        saved := DllCall("SaveDC", "Ptr", dc)
+        try {
+            DllCall("IntersectClipRect", "Ptr", dc, "Int", left, "Int", top, "Int", right, "Int", bottom)
+            DllCall("FillRect", "Ptr", dc, "Ptr", rect, "Ptr", DllCall("GetSysColorBrush", "Int", 5, "Ptr"))
+            if !this.Cache.Has(index) {
+                source := item
+                if !item.HasOwnProp("Html") || item.Html = "" {
+                    this.Renderer.StreamIn(item.Rtf)
+                    source := this.Renderer.Export()
+                }
+                this.Cache[index] := KweetyRich.Preview(source).Rtf
+            }
+            this.Renderer.StreamIn(this.Cache[index])
+            format := Buffer(A_PtrSize * 2 + 40, 0)
+            NumPut("Ptr", dc, "Ptr", dc, format)
+            dpiX := DllCall("GetDeviceCaps", "Ptr", dc, "Int", 88)
+            dpiY := DllCall("GetDeviceCaps", "Ptr", dc, "Int", 90)
+            for offset in [A_PtrSize * 2, A_PtrSize * 2 + 16] {
+                NumPut("Int", Round((left + 4) * 1440 / dpiX), "Int", Round(top * 1440 / dpiY),
+                    "Int", Round(right * 1440 / dpiX), "Int", Round((bottom + 100) * 1440 / dpiY), format, offset)
+            }
+            NumPut("Int", 0, "Int", -1, format, A_PtrSize * 2 + 32)
+            SendMessage(0x439, 1, format, this.Renderer.Hwnd) ; EM_FORMATRANGE
+            SendMessage(0x439, 0, 0, this.Renderer.Hwnd)
+        } finally {
+            DllCall("RestoreDC", "Ptr", dc, "Int", saved)
+        }
+        return 4 ; CDRF_SKIPDEFAULT
     }
 }

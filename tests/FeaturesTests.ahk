@@ -1,4 +1,4 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 #Warn VarUnset, StdOut
 #Include ..\lib\Core.ahk
 #Include ..\lib\TextTools.ahk
@@ -29,6 +29,15 @@ try {
     Verify(KweetyShortcut.Normalize("^Esc") == KweetyShortcut.Normalize("^Escape"), "key aliases canonicalized for duplicate detection")
     Reject(() => KweetyShortcut.Normalize("+f"), "Shift alone cannot replace ordinary typing")
     Reject(() => KweetyShortcut.Normalize("^Ctrl"), "modifier cannot be the main key")
+    history := KweetyHistory(false)
+    firstCopy := Buffer(10), secondCopy := Buffer(20), thirdCopy := Buffer(30)
+    history.Remember(firstCopy), history.Remember(secondCopy), history.Remember(thirdCopy)
+    Verify(history.Get(2) = secondCopy && history.Get(3) = firstCopy, "history indexes newest first")
+    Verify(history.Get(2) = secondCopy, "reading history never reorders entries")
+    Reject(() => history.Get(4), "missing history entry rejected")
+    Loop 25
+        history.Remember(Buffer(A_Index))
+    Verify(history.Items.Length = 20 && history.Get(20).Size = 6, "history retains latest twenty entries")
     shortcutGui := Gui()
     shortcut := KweetyShortcut(shortcutGui, "^+f")
     Verify(shortcut.Value == "^+f", "explicit modifier controls round trip Ctrl Shift F")
@@ -51,7 +60,13 @@ try {
     Verify(KweetyText.Layout("Ghbdtn, vbh!") == "Приветб мир!", "layout conversion preserves typed case and key positions")
     Verify(KweetyText.Layout("привет") == "ghbdtn", "reverse layout")
     Verify(KweetyText.Layout("ЖЭБЮЁ") == ':"<>~', "shifted punctuation layout conversion")
-    Verify(KweetyText.Case("привет мир") == "Привет Мир", "title case")
+    preview := KweetyRich.Preview(KweetyRich.FromRuns([
+        {Text: "first`n", Color: "FF0000", Bold: true, Italic: false, Underline: false},
+        {Text: "second`nthird", Color: "0000FF", Bold: false, Italic: true, Underline: true}]))
+    Verify(preview.Text == "first ↵ second ↵ third", "preview preserves all lines inline")
+    Verify(InStr(preview.Rtf, "\red255\green0\blue0;") && InStr(preview.Rtf, "\red0\green0\blue255;"), "preview preserves run colors")
+    Verify(KweetyText.InvertCase("aB Яё! 123") == "Ab яЁ! 123", "invert mixed Latin and Cyrillic case")
+    Verify(KweetyText.Case("привет мир") == "ПРИВЕТ МИР", "lowercase switches directly to uppercase")
     Verify(KweetyText.Case("Привет Мир") == "ПРИВЕТ МИР", "upper case")
     Verify(KweetyText.Case("ПРИВЕТ МИР") == "привет мир", "lower case")
     Verify(KweetyText.Excluded(["Discord.exe"], "DISCORD.EXE"), "case independent executable exclusion")
@@ -97,8 +112,23 @@ try {
     cfg.Items[1].Trigger := "warn"
     cfg.Excluded := ["Discord.exe", "C:\Тест\Редактор.exe"]
     cfg.LayoutKey := "^!F8"
+    cfg.Items[1].Formatting := true
+    cfg.InvertCaseKey := "^!i"
     KweetyStore.Save(testDir "\settings.ini", cfg)
     loaded := KweetyStore.Load(testDir "\settings.ini")
+    cfg.Immediate := 1, cfg.Space := 0, cfg.Enter := 0, cfg.Tab := 0
+    cfg.HistoryKey1 := "^!2", cfg.HistoryIndex1 := 7
+    KweetyStore.Save(testDir "\immediate.ini", cfg)
+    instant := KweetyStore.Load(testDir "\immediate.ini")
+    Verify(instant.Immediate && !instant.Space && !instant.Enter && !instant.Tab, "immediate expansion works without terminators")
+    Verify(instant.HistoryKey1 == "^!2" && instant.HistoryIndex1 = 7, "arbitrary history index and shortcut persist")
+    cfg.Immediate := 0
+    Reject(() => KweetyStore.Save(testDir "\invalid.ini", cfg), "terminator required when immediate mode off")
+    cfg.Space := 1
+    cfg.HistoryIndex1 := 21
+    Reject(() => KweetyStore.Save(testDir "\invalid.ini", cfg), "out of range history index rejected")
+    cfg.HistoryIndex1 := 7
+    Verify(loaded.Items[1].Formatting && loaded.InvertCaseKey == "^!i", "formatting opt-in and inversion shortcut persist")
     Verify(loaded.Items[1].Rtf == rich.Rtf && loaded.Items[1].Html == rich.Html, "rich payload storage round trip")
     Verify(loaded.Excluded[2] == cfg.Excluded[2] && loaded.LayoutKey == cfg.LayoutKey, "exclusions and hotkeys storage round trip")
     legacyPath := testDir "\legacy.ini"
@@ -129,6 +159,7 @@ try {
     FileAppend('<!DOCTYPE x [<!ENTITY x SYSTEM "file:///C:/not-allowed">]><PuntoSwitcherSettings>&x;</PuntoSwitcherSettings>', preferencesPath, "UTF-8")
     Reject(() => KweetyPunto.Preferences(preferencesPath), "external XML entities rejected")
     FileDelete(preferencesPath)
+    FileDelete(testDir "\immediate.ini")
     FileDelete(testDir "\settings.ini")
     DirDelete(testDir)
     ; Fixed independent fixture generated from the documented PSRF algorithm.

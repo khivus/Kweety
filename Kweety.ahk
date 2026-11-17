@@ -1,9 +1,9 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 #SingleInstance Force
 #ClipboardTimeout 250
 ;@Ahk2Exe-SetName Kweety
 ;@Ahk2Exe-SetDescription Kweety - text expansion
-;@Ahk2Exe-SetVersion 0.3.0
+;@Ahk2Exe-SetVersion 0.4.0
 #Include lib\Core.ahk
 #Include lib\Paste.ahk
 #Include lib\Startup.ahk
@@ -41,6 +41,7 @@ class KweetyApp {
         this.Path := A_AppData "\Kweety\settings.ini"
         this.Config := KweetyStore.Load(this.Path)
         this.Paste := KweetyPaste()
+        this.History := false
         OnExit((*) => (this.Paste.Restore(), 0))
         this.Registered := []
         this.FeatureKeys := []
@@ -48,6 +49,8 @@ class KweetyApp {
         this.RichEditor := false
         this.CachedWindow := 0
         this.Testing := A_Args.Length && A_Args[1] = "--smoke-test"
+        if !this.Testing
+            this.History := KweetyHistory()
         this.Startup := KweetyStartup()
         ; Follow an explicitly enabled startup setting when the EXE is updated/moved.
         if !this.Testing && this.Startup.IsEnabled() {
@@ -75,7 +78,7 @@ class KweetyApp {
     }
 
     BuildGui() {
-        g := this.Window := Gui(, "Kweety 0.3.0 — быстрые ответы")
+        g := this.Window := Gui(, "Kweety 0.4.0")
         g.SetFont("s10", "Segoe UI")
         g.MarginX := 20
         g.MarginY := 16
@@ -95,6 +98,8 @@ class KweetyApp {
             cb.OnEvent("Click", (*) => this.SaveOptions())
             this.Keys[key] := cb
         }
+        this.Immediate := g.AddCheckbox("xm y+12", "Сразу после последнего символа сокращения")
+        this.Immediate.OnEvent("Click", (*) => this.SaveOptions())
         this.ModeHint := g.AddText("xm y+18 w730 c555555", "")
         g.AddText("xm y+14", "Поиск шаблонов:")
         this.Search := g.AddEdit("x+12 yp-3 w550")
@@ -110,11 +115,13 @@ class KweetyApp {
         g.AddText("xm y+14 w730 c555555", "Двойной щелчок — изменить. Цвет и начертание доступны в редакторе шаблона.")
         this.Status := g.AddText("xm y+12 w730", "")
         g.AddButton("xm y+14 w170", "Свернуть в трей").OnEvent("Click", (*) => g.Hide())
-        g.AddButton("x+10 w150", "Папка настроек").OnEvent("Click", (*) => this.OpenData())
-        g.AddButton("x+10 w170", "Клавиши и исключения").OnEvent("Click", (*) => this.Settings())
+        g.AddButton("x+10 w120", "Горячие клавиши").OnEvent("Click", (*) => this.Settings())
+        g.AddButton("x+10 w120", "Исключения").OnEvent("Click", (*) => this.Exclusions())
+        g.AddButton("xm y+10 w150", "Папка настроек").OnEvent("Click", (*) => this.OpenData())
         g.AddButton("x+10 w140", "Импорт Punto").OnEvent("Click", (*) => this.ImportPunto())
         g.OnEvent("Close", (*) => g.Hide())
         g.OnEvent("Escape", (*) => g.Hide())
+        this.TablePainter := KweetyTablePreview(g, this.List, this)
         KweetyLayout.Enable(g, this.List)
         this.Refresh()
     }
@@ -133,7 +140,9 @@ class KweetyApp {
         testConfig := this.CopyConfig()
         testConfig.LayoutKey := "^+f"
         testConfig.CaseKey := "^!F8"
+        testConfig.InvertCaseKey := "^!F10"
         testConfig.MenuKey := "#+F9"
+        testConfig.HistoryKey1 := "", testConfig.HistoryKey2 := "", testConfig.HistoryKey3 := ""
         testConfig.Items := []
         Loop Parse "йцукенгшщзхъфывапролджэячсмитьбюё"
             testConfig.Items.Push({Trigger: A_LoopField, Text: "Тест`n{Enter}"})
@@ -147,6 +156,22 @@ class KweetyApp {
         this.RichEditor.Export()
         editor.Destroy()
         this.RichEditor := false
+        this.Window.Opt("-Disabled")
+        this.Config := this.CopyConfig()
+        this.Config.Immediate := 1
+        this.Config.Space := 0, this.Config.Enter := 0, this.Config.Tab := 0
+        this.Apply()
+        if !this.Immediate.Enabled
+            throw Error("Immediate control unavailable")
+        this.Refresh()
+        for key, control in this.Keys
+            if control.Enabled
+                throw Error("Terminator controls must be disabled in immediate mode")
+        this.Config := original
+        this.Apply()
+        this.Refresh()
+        exceptions := this.Exclusions()
+        exceptions.Destroy()
         this.Window.Opt("-Disabled")
         settings := this.Settings()
         settings.Destroy()
@@ -163,9 +188,12 @@ class KweetyApp {
     Refresh() {
         this.Enabled.Value := this.Config.Enabled
         this.FastPaste.Value := this.Config.FastPaste
+        this.Immediate.Value := this.Config.Immediate
+        for name, cb in this.Keys
+            cb.Enabled := !this.Config.Immediate
         this.ModeHint.Text := this.Config.FastPaste
-            ? "Текст вставляется целиком вместе с переносами. Клавиша замены поглощается."
-            : "Клавиша замены поглощается. Переносы внутри текста — Shift+Enter."
+            ? "Ctrl+V: быстрая вставка через буфер, с оформлением, если оно включено у шаблона."
+            : "Режим клавиш: обычный текст без оформления, переносы — Shift+Enter. Для совместимости."
         for name, cb in this.Keys
             cb.Value := this.Config.%name%
         this.FillList()
@@ -189,6 +217,7 @@ class KweetyApp {
     }
 
     FillList() {
+        this.TablePainter.Cache := Map()
         this.List.Delete(), this.VisibleItems := []
         for index, item in this.Config.Items {
             if !KweetyText.Matches(item, this.Search.Value)
@@ -215,13 +244,13 @@ class KweetyApp {
             payload := this.Config.FastPaste ? [] : KweetyCore.CompileBatches(item.Text)
             for alias in KweetyCore.Aliases(item.Trigger) {
                 ; B0: delete the abbreviation in the SAME send as its replacement.
-                name := ":B0OC1X:" alias
+                name := ":" (this.Config.Immediate ? "*" : "") "B0OC1X:" alias
                 Hotstring(name, this.Expand.Bind(this, payload, StrLen(alias), item), "On")
                 this.Registered.Push(name)
             }
         }
         used := Map()
-        for kind, property in Map("layout", "LayoutKey", "case", "CaseKey", "menu", "MenuKey") {
+        for kind, property in Map("layout", "LayoutKey", "case", "CaseKey", "invert", "InvertCaseKey", "menu", "MenuKey") {
             key := KweetyShortcut.Normalize(this.Config.%property%)
             if key = ""
                 continue
@@ -229,8 +258,18 @@ class KweetyApp {
                 throw Error("Горячие клавиши не должны совпадать.")
             used[StrLower(key)] := true
             action := kind = "menu" ? this.Picker.Bind(this) : this.Transform.Bind(this, kind)
-            Hotkey(key, action, "On")
-            this.FeatureKeys.Push(key)
+            Hotkey("$" key, action, "On")
+            this.FeatureKeys.Push("$" key)
+        }
+        Loop 3 {
+            key := KweetyShortcut.Normalize(this.Config.%"HistoryKey" A_Index%)
+            if key = ""
+                continue
+            if used.Has(StrLower(key))
+                throw Error("Горячие клавиши не должны совпадать.")
+            used[StrLower(key)] := true
+            Hotkey("$" key, this.PasteHistory.Bind(this, this.Config.%"HistoryIndex" A_Index%), "On")
+            this.FeatureKeys.Push("$" key)
         }
         HotIf()
         Hotstring("Reset")
@@ -243,23 +282,18 @@ class KweetyApp {
             target := WinExist("A")
             if !this.WaitForInput(target)
                 return
-            rich := item.HasOwnProp("Rtf") && item.Rtf != ""
+            rich := item.HasOwnProp("Formatting") && item.Formatting && item.HasOwnProp("Rtf") && item.Rtf != ""
             if this.Config.FastPaste {
-                if !this.Paste.Prepare(item.Text, rich ? item.Rtf : "", item.HasOwnProp("Html") ? item.Html : "") {
+                if !this.Paste.Prepare(item.Text, rich ? item.Rtf : "", rich && item.HasOwnProp("Html") ? item.Html : "") {
                     TrayTip("Не удалось получить буфер обмена. Сокращение осталось на месте; повторите его набор.", "Kweety — вставка не выполнена", 2)
                     return
                 }
                 try {
                     if !WinActive("ahk_id " target)
                         return
-                    ; Let the editor finish removing the trigger before pasting.
-                    SetKeyDelay(10, 10)
-                    if eraseCount {
-                        SendEvent("{Backspace " eraseCount "}")
-                        Sleep(60)
-                    }
-                    if WinActive("ahk_id " target)
-                        SendEvent("^v")
+                    ; Queue deletion and paste together, without per-key delays or
+                    ; a visible empty-text pause. Prepare the clipboard first.
+                    SendInput(eraseCount ? KweetyPaste.PasteKeys(eraseCount) : "^v")
                 }
                 finally this.Paste.ScheduleRestore()
             } else {
@@ -308,14 +342,17 @@ class KweetyApp {
         return true
     }
 
-    CopyConfig() => {Enabled: this.Config.Enabled, FastPaste: this.Config.FastPaste, Space: this.Config.Space,
+    CopyConfig() => {Immediate: this.Config.Immediate,
+        HistoryKey1: this.Config.HistoryKey1, HistoryKey2: this.Config.HistoryKey2, HistoryKey3: this.Config.HistoryKey3,
+        HistoryIndex1: this.Config.HistoryIndex1, HistoryIndex2: this.Config.HistoryIndex2, HistoryIndex3: this.Config.HistoryIndex3, Enabled: this.Config.Enabled, FastPaste: this.Config.FastPaste, Space: this.Config.Space,
         Enter: this.Config.Enter, Tab: this.Config.Tab, Items: this.Config.Items.Clone(),
-        LayoutKey: this.Config.LayoutKey, CaseKey: this.Config.CaseKey, MenuKey: this.Config.MenuKey, Excluded: this.Config.Excluded.Clone()}
+        LayoutKey: this.Config.LayoutKey, CaseKey: this.Config.CaseKey, InvertCaseKey: this.Config.InvertCaseKey, MenuKey: this.Config.MenuKey, Excluded: this.Config.Excluded.Clone()}
 
     SaveOptions() {
         cfg := this.CopyConfig()
         cfg.Enabled := this.Enabled.Value
         cfg.FastPaste := this.FastPaste.Value
+        cfg.Immediate := this.Immediate.Value
         for name, cb in this.Keys
             cfg.%name% := cb.Value
         if !this.Persist(cfg)
@@ -366,13 +403,17 @@ class KweetyApp {
         editor.AddText(, "Сокращение")
         trigger := editor.AddEdit("xm y+6 w580", original.Trigger)
         editor.AddText("xm y+10 w580 c555555", "Буквы, цифры, _ и -. Вторая раскладка добавится автоматически.")
-        editor.AddText("xm y+16", "Текст подстановки")
-        editor.AddButton("xm y+6 w65", "Ж").OnEvent("Click", (*) => body.Format("bold"))
-        editor.AddButton("x+6 w65", "К").OnEvent("Click", (*) => body.Format("italic"))
-        editor.AddButton("x+6 w65", "Ч").OnEvent("Click", (*) => body.Format("underline"))
+        formatting := editor.AddCheckbox("xm y+16", "Использовать оформление (цвет, жирный, курсив)")
+        formatting.Value := original.HasOwnProp("Formatting") && original.Formatting
+        editor.Formatting := formatting
+        editor.OriginalFormatting := formatting.Value
+        editor.AddText("xm y+10", "Текст подстановки")
+        editor.AddButton("xm y+6 w50 h30", "Ж").OnEvent("Click", (*) => body.Format("bold"))
+        editor.AddButton("x+6 w50 h30", "К").OnEvent("Click", (*) => body.Format("italic"))
+        editor.AddButton("x+6 w50 h30", "Ч").OnEvent("Click", (*) => body.Format("underline"))
         color := editor.AddEdit("x+12 w95", "FF0000")
-        editor.AddButton("x+6 w75", "Цвет…").OnEvent("Click", (*) => this.SetColor(body, color))
-        editor.AddButton("x+6 w155", "Вставить с оформлением").OnEvent("Click", (*) => body.PasteFormatted())
+        editor.AddButton("x+6 w75 h30", "Цвет…").OnEvent("Click", (*) => this.SetColor(body, color))
+        editor.AddButton("x+6 w200 h30", "Вставить с оформлением").OnEvent("Click", (*) => body.PasteFormatted())
         body := KweetyRichEdit(editor, "xm y+8 w580 h240", original)
         this.RichEditor := body
         editor.AddText("xm y+10 w580 c555555", "Enter создаёт строку. В режиме Ctrl+V переносы вставляются вместе с текстом.`nСимволы вроде {Enter}, ! и + вставляются буквально.")
@@ -390,7 +431,7 @@ class KweetyApp {
     }
 
     CloseEditor(editor, trigger, body, original) {
-        if (trigger.Value != original.Trigger || body.Dirty())
+        if (trigger.Value != original.Trigger || body.Dirty() || editor.Formatting.Value != editor.OriginalFormatting)
             && MsgBox("Закрыть без сохранения изменений?", "Kweety", "YesNo Icon?") != "Yes"
             return true
         return this.FinishEditor(editor)
@@ -407,6 +448,7 @@ class KweetyApp {
     SaveEditor(editor, trigger, body, row) {
         cfg := this.CopyConfig()
         item := body.Export()
+        item.Formatting := editor.Formatting.Value
         item.Trigger := StrLower(Trim(trigger.Value))
         if row
             cfg.Items[row] := item
@@ -469,24 +511,24 @@ class KweetyApp {
         recoverClipboard := false
         try {
             target := WinExist("A")
-            if !this.WaitForInput(target)
+            if !target
                 return
-            SetKeyDelay(10, 10)
+            ; SendInput manages shortcut modifiers itself, including held keys.
+            ; Waiting for physical release made held/repeated shortcuts time out.
             if !this.Paste.Restore()
                 return
             snapshot := ClipboardAll()
             recoverClipboard := true
             A_Clipboard := ""
-            SendEvent("^c")
+            SendInput("^c")
             if !ClipWait(0.15) {
-                SendEvent("^+{Left}")
-                Sleep(60)
+                SendInput("^+{Left}")
                 if !WinActive("ahk_id " target) {
                     A_Clipboard := snapshot
                     recoverClipboard := false
                     return
                 }
-                SendEvent("^c")
+                SendInput("^c")
                 if !ClipWait(0.3) {
                     A_Clipboard := snapshot
                     recoverClipboard := false
@@ -496,11 +538,11 @@ class KweetyApp {
             text := A_Clipboard
             this.Paste.SeedOriginal(snapshot)
             recoverClipboard := false
-            replacement := kind = "layout" ? KweetyText.Layout(text) : KweetyText.Case(text)
+            replacement := kind = "layout" ? KweetyText.Layout(text) : kind = "invert" ? KweetyText.InvertCase(text) : KweetyText.Case(text)
             if this.Paste.Prepare(replacement) {
                 try {
                     if WinActive("ahk_id " target)
-                        SendEvent("^v")
+                        SendInput("^v")
                 }
                 finally this.Paste.ScheduleRestore()
             } else
@@ -513,27 +555,67 @@ class KweetyApp {
             TrayTip(err.Message, "Kweety — преобразование не выполнено", 2)
         }
         finally {
+            KweetyWindowsClipboard.MarkInternal()
             Hotstring("Reset")
             Critical("Off")
         }
     }
 
     Settings() {
-        dialog := Gui("+Owner" this.Window.Hwnd, "Клавиши и программы-исключения")
+        dialog := Gui("+Owner" this.Window.Hwnd, "Горячие клавиши")
         dialog.SetFont("s10", "Segoe UI")
         controls := Map()
-        for property, label in Map("LayoutKey", "Исправить раскладку выделения / последнего слова", "CaseKey", "Сменить регистр выделения / последнего слова", "MenuKey", "Открыть поиск шаблонов") {
+        for property, label in Map("LayoutKey", "Исправить раскладку выделения / последнего слова", "CaseKey", "Верхний / нижний регистр выделения / последнего слова", "InvertCaseKey", "Инвертировать регистр: аБв → АбВ", "MenuKey", "Открыть поиск шаблонов") {
             dialog.AddText("xm y+12 w500", label)
             controls[property] := KweetyShortcut(dialog, this.Config.%property%)
         }
-        dialog.AddText("xm y+16 w540", "Программы-исключения: имя EXE или полный путь, по одному в строке.`nВ них отключаются и сокращения, и горячие клавиши Kweety.")
+        indices := Map()
+        dialog.AddText("xm y+16 w540", "История буфера Kweety: 1 — последняя запись, 2 — предпоследняя.`nДо 20 записей в памяти, только пока работает Kweety (не Win+V).")
+        Loop 3 {
+            key := "HistoryKey" A_Index, index := "HistoryIndex" A_Index
+            dialog.AddText("xm y+12", "Вставить запись №")
+            indices[index] := dialog.AddEdit("x+8 yp-3 w60 Number", this.Config.%index%)
+            controls[key] := KweetyShortcut(dialog, this.Config.%key%)
+        }
+        close := (*) => (this.Window.Opt("-Disabled"), dialog.Destroy(), this.Show())
+        dialog.AddButton("xm y+12 w140", "Сохранить").OnEvent("Click", (*) => this.SaveSettings(controls, indices, close))
+        dialog.AddButton("x+10 w140", "Отмена").OnEvent("Click", close)
+        dialog.OnEvent("Close", close)
+        dialog.OnEvent("Escape", close)
+        this.Window.Opt("+Disabled")
+        dialog.Show(this.Testing ? "Hide" : "")
+        return dialog
+    }
+
+    SaveSettings(controls, indices, close) {
+        cfg := this.CopyConfig()
+        try {
+            for property, control in controls
+                cfg.%property% := control.Value
+            for property, control in indices {
+                if !RegExMatch(control.Value, "^\d+$") || Integer(control.Value) < 1 || Integer(control.Value) > 20
+                    throw Error("Номер записи буфера должен быть от 1 до 20.")
+                cfg.%property% := Integer(control.Value)
+            }
+        } catch as err {
+            MsgBox(err.Message, "Горячие клавиши", "Icon!")
+            return
+        }
+        if this.Persist(cfg)
+            close.Call()
+    }
+
+    Exclusions() {
+        dialog := Gui("+Owner" this.Window.Hwnd, "Программы-исключения")
+        dialog.SetFont("s10", "Segoe UI")
+        dialog.AddText("w540", "Имя EXE или полный путь, по одному в строке.`nВ этих программах отключены сокращения и горячие клавиши.")
         rules := ""
         for rule in this.Config.Excluded
             rules .= rule "`r`n"
-        excluded := dialog.AddEdit("xm y+8 w540 r6", rules)
+        excluded := dialog.AddEdit("xm y+8 w540 r8", rules)
         dialog.AddButton("xm y+8 w200", "Добавить программу…").OnEvent("Click", (*) => this.AddExclusion(excluded))
         close := (*) => (this.Window.Opt("-Disabled"), dialog.Destroy(), this.Show())
-        dialog.AddButton("xm y+12 w140", "Сохранить").OnEvent("Click", (*) => this.SaveSettings(controls, excluded, close))
+        dialog.AddButton("xm y+12 w140", "Сохранить").OnEvent("Click", (*) => this.SaveExclusions(excluded, close))
         dialog.AddButton("x+10 w140", "Отмена").OnEvent("Click", close)
         dialog.OnEvent("Close", close)
         dialog.OnEvent("Escape", close)
@@ -543,21 +625,37 @@ class KweetyApp {
         return dialog
     }
 
-    SaveSettings(controls, excluded, close) {
+    SaveExclusions(excluded, close) {
         cfg := this.CopyConfig()
-        try {
-            for property, control in controls
-                cfg.%property% := control.Value
-        } catch as err {
-            MsgBox(err.Message, "Горячие клавиши", "Icon!")
-            return
-        }
         cfg.Excluded := []
         for rule in StrSplit(excluded.Value, "`n", "`r")
             if Trim(rule) != ""
                 cfg.Excluded.Push(Trim(rule))
         if this.Persist(cfg)
             close.Call()
+    }
+
+    PasteHistory(index, *) {
+        Critical("On")
+        try {
+            target := WinExist("A")
+            entry := this.History.Get(index)
+            if !this.Paste.Restore()
+                return
+            original := ClipboardAll()
+            this.Paste.SeedOriginal(original)
+            this.Paste.Clipboard.Restore(entry)
+            this.Paste.Expected := this.Paste.Clipboard.Sequence()
+            if WinActive("ahk_id " target)
+                SendInput("^v")
+        } catch as err {
+            TrayTip(err.Message, "История буфера Kweety", 2)
+        } finally {
+            if this.Paste.Pending
+                this.Paste.ScheduleRestore()
+            Hotstring("Reset")
+            Critical("Off")
+        }
     }
 
     AddExclusion(control) {

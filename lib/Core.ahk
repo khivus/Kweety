@@ -1,4 +1,4 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 
 class KweetyCore {
     static Aliases(trigger) {
@@ -119,8 +119,9 @@ class KweetyCore {
 }
 
 class KweetyStore {
-    static Defaults() => {Enabled: 1, FastPaste: 1, Space: 1, Enter: 1, Tab: 0,
-        LayoutKey: "", CaseKey: "", MenuKey: "", Excluded: [],
+    static Defaults() => {Enabled: 1, Immediate: 0, FastPaste: 1, Space: 1, Enter: 1, Tab: 0,
+        HistoryKey1: "", HistoryKey2: "", HistoryKey3: "", HistoryIndex1: 2, HistoryIndex2: 3, HistoryIndex3: 4,
+        LayoutKey: "", CaseKey: "", InvertCaseKey: "", MenuKey: "", Excluded: [],
         Items: [{Trigger: "fff", Text: "тестовый текст"}]}
 
     static Load(path) {
@@ -160,8 +161,20 @@ class KweetyStore {
         if fastPaste != "0" && fastPaste != "1"
             throw Error("Повреждена настройка: FastPaste")
         cfg.FastPaste := Integer(fastPaste)
+        immediate := data["Kweety"].Has("Immediate") ? data["Kweety"]["Immediate"] : "0"
+        if immediate != "0" && immediate != "1"
+            throw Error("Повреждена настройка: Immediate")
+        cfg.Immediate := Integer(immediate)
+        Loop 3 {
+            key := "HistoryKey" A_Index, index := "HistoryIndex" A_Index
+            cfg.%key% := data["Kweety"].Has(key) ? KweetyCore.Decode(data["Kweety"][key]) : ""
+            value := data["Kweety"].Has(index) ? data["Kweety"][index] : A_Index + 1
+            if !RegExMatch(value, "^\d+$") || Integer(value) < 1 || Integer(value) > 20
+                throw Error("Номер записи буфера должен быть от 1 до 20.")
+            cfg.%index% := Integer(value)
+        }
         defaults := this.Defaults()
-        for property in ["LayoutKey", "CaseKey", "MenuKey"]
+        for property in ["LayoutKey", "CaseKey", "InvertCaseKey", "MenuKey"]
             cfg.%property% := data["Kweety"].Has(property) ? KweetyCore.Decode(data["Kweety"][property]) : defaults.%property%
         ; Remove defaults assigned by 0.2.0 once; retain custom or later opt-in keys.
         if !data["Kweety"].Has("HotkeysOptIn") {
@@ -175,7 +188,7 @@ class KweetyStore {
                 if Trim(rule) != ""
                     cfg.Excluded.Push(Trim(rule))
         }
-        if !cfg.Space && !cfg.Enter && !cfg.Tab
+        if !(cfg.HasOwnProp("Immediate") && cfg.Immediate) && !cfg.Space && !cfg.Enter && !cfg.Tab
             throw Error("В настройках не выбрана клавиша замены.")
         count := this.Read(data, "Kweety", "Count")
         if !RegExMatch(count, "^\d+$") || Integer(count) > 1000
@@ -184,6 +197,7 @@ class KweetyStore {
             section := "Snippet" A_Index
             cfg.Items.Push({Trigger: this.Read(data, section, "Trigger"),
                 Text: KweetyCore.Decode(this.Read(data, section, "Text"))})
+            cfg.Items[-1].Formatting := data[section].Has("Formatting") && data[section]["Formatting"] = "1"
             for property in ["Rtf", "Html"]
                 if data[section].Has(property)
                     cfg.Items[-1].%property% := KweetyCore.Decode(data[section][property])
@@ -207,15 +221,23 @@ class KweetyStore {
         KweetyCore.Validate(cfg.Items)
         if cfg.Items.Length > 1000
             throw Error("Можно сохранить не более 1000 шаблонов.")
-        if !cfg.Space && !cfg.Enter && !cfg.Tab
+        if !(cfg.HasOwnProp("Immediate") && cfg.Immediate) && !cfg.Space && !cfg.Enter && !cfg.Tab
             throw Error("Выберите хотя бы одну клавишу замены.")
         SplitPath(path, , &dir)
         DirCreate(dir)
         content := "[Kweety]`r`nVersion=2`r`nHotkeysOptIn=1`r`nCount=" cfg.Items.Length "`r`n"
         for name in ["Enabled", "FastPaste", "Space", "Enter", "Tab"]
             content .= name "=" cfg.%name% "`r`n"
+        content .= "Immediate=" (cfg.HasOwnProp("Immediate") && cfg.Immediate ? 1 : 0) "`r`n"
+        Loop 3 {
+            key := "HistoryKey" A_Index, index := "HistoryIndex" A_Index
+            value := cfg.HasOwnProp(index) ? cfg.%index% : A_Index + 1
+            if !IsInteger(value) || value < 1 || value > 20
+                throw Error("Номер записи буфера должен быть от 1 до 20.")
+            content .= key "=" KweetyCore.Encode(cfg.HasOwnProp(key) ? cfg.%key% : "") "`r`n" index "=" value "`r`n"
+        }
         defaults := this.Defaults()
-        for property in ["LayoutKey", "CaseKey", "MenuKey"]
+        for property in ["LayoutKey", "CaseKey", "InvertCaseKey", "MenuKey"]
             content .= property "=" KweetyCore.Encode(cfg.HasOwnProp(property) ? cfg.%property% : defaults.%property%) "`r`n"
         excluded := ""
         if cfg.HasOwnProp("Excluded")
@@ -224,6 +246,7 @@ class KweetyStore {
         content .= "Excluded=" KweetyCore.Encode(excluded) "`r`n"
         for i, item in cfg.Items {
             content .= "`r`n[Snippet" i "]`r`nTrigger=" item.Trigger "`r`nText=" KweetyCore.Encode(item.Text) "`r`n"
+            content .= "Formatting=" (item.HasOwnProp("Formatting") && item.Formatting ? 1 : 0) "`r`n"
             for property in ["Rtf", "Html"]
                 if item.HasOwnProp(property) && item.%property% != ""
                     content .= property "=" KweetyCore.Encode(item.%property%) "`r`n"

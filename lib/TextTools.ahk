@@ -1,4 +1,4 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 
 class KweetyText {
     static Layout(text) {
@@ -23,11 +23,16 @@ class KweetyText {
         return result
     }
 
+    static InvertCase(text) {
+        result := ""
+        Loop Parse text
+            result .= A_LoopField == StrUpper(A_LoopField) ? StrLower(A_LoopField) : StrUpper(A_LoopField)
+        return result
+    }
+
     static Case(text) {
         if text == StrUpper(text)
             return StrLower(text)
-        if text == StrLower(text)
-            return StrTitle(text)
         return StrUpper(text)
     }
 

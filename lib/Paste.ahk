@@ -1,10 +1,18 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 
 class KweetyWindowsClipboard {
+    static InternalSequence := -1
+    static MarkInternal() => KweetyWindowsClipboard.InternalSequence := DllCall("GetClipboardSequenceNumber", "UInt")
     Capture() => ClipboardAll()
     Sequence() => DllCall("GetClipboardSequenceNumber", "UInt")
-    Write(text) => A_Clipboard := text
-    Restore(data) => A_Clipboard := data
+    Write(text) {
+        A_Clipboard := text
+        KweetyWindowsClipboard.MarkInternal()
+    }
+    Restore(data) {
+        A_Clipboard := data
+        KweetyWindowsClipboard.MarkInternal()
+    }
 
     static ReadFormat(name, encoding := "CP0") {
         format := DllCall("RegisterClipboardFormat", "Str", name, "UInt")
@@ -35,7 +43,10 @@ class KweetyWindowsClipboard {
                 this.AddFormat("Rich Text Format", rtf, "CP0")
             if html != ""
                 this.AddFormat("HTML Format", KweetyRich.ClipboardHtml(html), "UTF-8")
-        } finally DllCall("CloseClipboard")
+        } finally {
+            DllCall("CloseClipboard")
+            KweetyWindowsClipboard.MarkInternal()
+        }
     }
 
     AddFormat(name, value, encoding) {
@@ -150,5 +161,38 @@ class KweetyPaste {
         this.Pending := false
         this.Saved := ""
         return true
+    }
+}
+
+class KweetyHistory {
+    __New(watch := true) {
+        this.Items := []
+        this.Handler := this.Changed.Bind(this)
+        if watch {
+            OnClipboardChange(this.Handler)
+            this.Changed(1)
+        }
+    }
+
+    Changed(kind) {
+        if !kind || DllCall("GetClipboardSequenceNumber", "UInt") = KweetyWindowsClipboard.InternalSequence
+            return
+        try {
+            this.Remember(ClipboardAll())
+        }
+    }
+
+    Remember(entry) {
+        if !entry.Size || entry.Size > 16000000
+            return
+        this.Items.InsertAt(1, entry)
+        if this.Items.Length > 20
+            this.Items.Pop()
+    }
+
+    Get(index) {
+        if index < 1 || index > this.Items.Length
+            throw Error("В истории Kweety пока нет записи №" index ". Копируйте данные при запущенной программе.")
+        return this.Items[index]
     }
 }
