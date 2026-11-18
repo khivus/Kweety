@@ -7,6 +7,7 @@
 #Include ..\lib\Rich.ahk
 #Include ..\lib\Shortcut.ahk
 #Include ..\lib\Layout.ahk
+#Include ..\lib\InputLanguage.ahk
 
 count := 0
 Verify(value, message) {
@@ -23,6 +24,24 @@ Reject(call, message) {
     Verify(failed, message)
 }
 try {
+    ; VK_LMENU, VK_LSHIFT, and VK_RSHIFT exercise both press and release orders.
+    for shift in [0xA0, 0xA1] {
+        for pressOrder in [[0xA4, shift], [shift, 0xA4]] {
+            for releaseOrder in [[0xA4, shift], [shift, 0xA4]] {
+                inputLanguage := KweetyInputLanguage()
+                Verify(inputLanguage.Track(pressOrder[1], false) = "", "first modifier passes through")
+                Verify(inputLanguage.Track(pressOrder[2], false) = "mask", "second modifier masks Alt")
+                Verify(inputLanguage.Track(pressOrder[2], false) = "", "repeat does not rearm layout switch")
+                Verify(inputLanguage.Track(releaseOrder[1], true) = "switch", "switch on first modifier release")
+                Verify(inputLanguage.Track(releaseOrder[2], true) = "", "second release does not switch again")
+            }
+        }
+    }
+    inputLanguage.Track(0xA4, false), inputLanguage.Track(0xA0, false)
+    inputLanguage.Track(0x09, false)  ; Alt+Shift+Tab must keep its usual meaning.
+    Verify(inputLanguage.Track(0xA0, true) = "" && inputLanguage.Track(0xA4, true) = "", "third key cancels switch")
+    inputLanguage.Track(0xA0, false)
+    Verify(inputLanguage.Track(0xA5, false) = "" && inputLanguage.Track(0xA0, true) = "", "right Alt is excluded")
     Verify(KweetyShortcut.Normalize("+^F") == "^+f", "Ctrl Shift F accepted and canonicalized")
     Verify(KweetyShortcut.Normalize("!а") == "!f" && KweetyShortcut.Normalize("!в") == "!d", "legacy Cyrillic shortcuts use their physical letter keys")
     Verify(KweetyShortcut.Binding("^+f") == "$^+vk46", "letter shortcut registration uses a layout-independent key code")
@@ -118,10 +137,13 @@ try {
     cfg.InvertCaseKey := "^!i"
     KweetyStore.Save(testDir "\settings.ini", cfg)
     loaded := KweetyStore.Load(testDir "\settings.ini")
+    Verify(!loaded.AltShiftSwitch, "Alt+Shift switching is off by default")
     cfg.Immediate := 1, cfg.Space := 0, cfg.Enter := 0, cfg.Tab := 0
+    cfg.AltShiftSwitch := 1
     cfg.HistoryKey1 := "^!2", cfg.HistoryIndex1 := 7
     KweetyStore.Save(testDir "\immediate.ini", cfg)
     instant := KweetyStore.Load(testDir "\immediate.ini")
+    Verify(instant.AltShiftSwitch = 1, "Alt+Shift opt-in persists")
     Verify(instant.Immediate && !instant.Space && !instant.Enter && !instant.Tab, "immediate expansion works without terminators")
     Verify(instant.HistoryKey1 == "^!2" && instant.HistoryIndex1 = 7, "arbitrary history index and shortcut persist")
     cfg.Immediate := 0
@@ -137,6 +159,7 @@ try {
     legacy := "[Kweety]`r`nVersion=1`r`nCount=1`r`nEnabled=1`r`nSpace=1`r`nEnter=1`r`nTab=0`r`n[Snippet1]`r`nTrigger=fff`r`nText=" KweetyCore.Encode("Старый шаблон") "`r`n"
     FileAppend(legacy, legacyPath, "UTF-16")
     legacyLoaded := KweetyStore.Load(legacyPath)
+    Verify(!legacyLoaded.AltShiftSwitch, "legacy settings do not opt in")
     Verify(legacyLoaded.Items[1].Text == "Старый шаблон" && legacyLoaded.LayoutKey == "" && legacyLoaded.CaseKey == "" && legacyLoaded.MenuKey == "" && legacyLoaded.Excluded.Length = 0, "old v1 configuration does not assign hotkeys")
     assigned := StrReplace(FileRead(testDir "\settings.ini"), "HotkeysOptIn=1`r`n", "")
     assigned := RegExReplace(assigned, "m)^LayoutKey=[^\r\n]*", "LayoutKey=" KweetyCore.Encode("^!l"))

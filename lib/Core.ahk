@@ -121,7 +121,7 @@ class KweetyCore {
 class KweetyStore {
     static Defaults() => {Enabled: 1, Immediate: 0, FastPaste: 1, Space: 1, Enter: 1, Tab: 0,
         HistoryKey1: "", HistoryKey2: "", HistoryKey3: "", HistoryIndex1: 2, HistoryIndex2: 3, HistoryIndex3: 4,
-        LayoutKey: "", CaseKey: "", InvertCaseKey: "", MenuKey: "", Excluded: [],
+        LayoutKey: "", CaseKey: "", InvertCaseKey: "", MenuKey: "", AltShiftSwitch: 0, Excluded: [],
         Items: [{Trigger: "fff", Text: "тестовый текст"}]}
 
     static Load(path) {
@@ -165,6 +165,10 @@ class KweetyStore {
         if immediate != "0" && immediate != "1"
             throw Error("Повреждена настройка: Immediate")
         cfg.Immediate := Integer(immediate)
+        altShift := data["Kweety"].Has("AltShiftSwitch") ? data["Kweety"]["AltShiftSwitch"] : "0"
+        if altShift != "0" && altShift != "1"
+            throw Error("Повреждена настройка: AltShiftSwitch")
+        cfg.AltShiftSwitch := Integer(altShift)
         Loop 3 {
             key := "HistoryKey" A_Index, index := "HistoryIndex" A_Index
             cfg.%key% := data["Kweety"].Has(key) ? KweetyCore.Decode(data["Kweety"][key]) : ""
@@ -240,6 +244,7 @@ class KweetyStore {
         for name in ["Enabled", "FastPaste", "Space", "Enter", "Tab"]
             content .= name "=" cfg.%name% "`r`n"
         content .= "Immediate=" (cfg.HasOwnProp("Immediate") && cfg.Immediate ? 1 : 0) "`r`n"
+        content .= "AltShiftSwitch=" (cfg.HasOwnProp("AltShiftSwitch") && cfg.AltShiftSwitch ? 1 : 0) "`r`n"
         Loop 3 {
             key := "HistoryKey" A_Index, index := "HistoryIndex" A_Index
             value := cfg.HasOwnProp(index) ? cfg.%index% : A_Index + 1

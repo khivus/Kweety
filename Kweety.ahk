@@ -3,7 +3,7 @@
 #ClipboardTimeout 250
 ;@Ahk2Exe-SetName Kweety
 ;@Ahk2Exe-SetDescription Kweety - text expansion
-;@Ahk2Exe-SetVersion 0.4.3
+;@Ahk2Exe-SetVersion 0.4.4
 #Include lib\Core.ahk
 #Include lib\Paste.ahk
 #Include lib\Startup.ahk
@@ -12,6 +12,7 @@
 #Include lib\Rich.ahk
 #Include lib\Shortcut.ahk
 #Include lib\Layout.ahk
+#Include lib\InputLanguage.ahk
 
 SetWorkingDir(A_ScriptDir)
 SendMode("Input")
@@ -43,6 +44,7 @@ class KweetyApp {
         reset := this.Testing ? (A_Args.Length >= 3 && A_Args[3] = "--reset-config")
             : (A_Args.Length && A_Args[1] = "--reset-config")
         this.Paste := KweetyPaste()
+        this.InputLanguage := KweetyInputLanguage()
         this.History := false
         OnExit((*) => (this.Paste.Restore(), 0))
         this.Registered := []
@@ -111,7 +113,7 @@ class KweetyApp {
     }
 
     BuildGui() {
-        g := this.Window := Gui(, "Kweety 0.4.3")
+        g := this.Window := Gui(, "Kweety 0.4.4")
         g.SetFont("s10", "Segoe UI")
         g.MarginX := 20
         g.MarginY := 16
@@ -178,6 +180,7 @@ class KweetyApp {
         testConfig.CaseKey := "^!F8"
         testConfig.InvertCaseKey := "^!F10"
         testConfig.MenuKey := "#+F9"
+        testConfig.AltShiftSwitch := 1
         testConfig.HistoryKey1 := "", testConfig.HistoryKey2 := "", testConfig.HistoryKey3 := ""
         testConfig.Items := []
         Loop Parse "йцукенгшщзхъфывапролджэячсмитьбюё"
@@ -302,6 +305,7 @@ class KweetyApp {
         }
         HotIf()
         Hotstring("Reset")
+        this.InputLanguage.SetEnabled(this.Config.AltShiftSwitch)
     }
 
     Expand(payload, eraseCount, item, *) {
@@ -386,7 +390,8 @@ class KweetyApp {
         HistoryKey1: this.Config.HistoryKey1, HistoryKey2: this.Config.HistoryKey2, HistoryKey3: this.Config.HistoryKey3,
         HistoryIndex1: this.Config.HistoryIndex1, HistoryIndex2: this.Config.HistoryIndex2, HistoryIndex3: this.Config.HistoryIndex3, Enabled: this.Config.Enabled, FastPaste: this.Config.FastPaste, Space: this.Config.Space,
         Enter: this.Config.Enter, Tab: this.Config.Tab, Items: this.Config.Items.Clone(),
-        LayoutKey: this.Config.LayoutKey, CaseKey: this.Config.CaseKey, InvertCaseKey: this.Config.InvertCaseKey, MenuKey: this.Config.MenuKey, Excluded: this.Config.Excluded.Clone()}
+        LayoutKey: this.Config.LayoutKey, CaseKey: this.Config.CaseKey, InvertCaseKey: this.Config.InvertCaseKey, MenuKey: this.Config.MenuKey,
+        AltShiftSwitch: this.Config.AltShiftSwitch, Excluded: this.Config.Excluded.Clone()}
 
     OptionsChanged() {
         for property, control in this.Options
@@ -644,6 +649,10 @@ class KweetyApp {
         dialog := Gui("+Owner" this.Window.Hwnd, "Горячие клавиши")
         dialog.SetFont("s10", "Segoe UI")
         controls := Map()
+        altShift := dialog.AddCheckbox("xm w540", "Переключать раскладку по Alt+Shift без активации меню")
+        altShift.Value := this.Config.AltShiftSwitch
+        controls["AltShiftSwitch"] := altShift
+        dialog.AddText("xm w540 c555555", "Отключите Alt+Shift в сочетаниях клавиш для языков ввода Windows. Работает с левым Alt, пока запущен Kweety.")
         for property, label in Map("LayoutKey", "Исправить раскладку выделения / последнего слова", "CaseKey", "Верхний / нижний регистр выделения / последнего слова", "InvertCaseKey", "Инвертировать регистр: аБв → АбВ", "MenuKey", "Открыть поиск шаблонов") {
             dialog.AddText("xm y+12 w500", label)
             controls[property] := KweetyShortcut(dialog, this.Config.%property%)
