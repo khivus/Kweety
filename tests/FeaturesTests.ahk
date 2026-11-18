@@ -24,6 +24,8 @@ Reject(call, message) {
 }
 try {
     Verify(KweetyShortcut.Normalize("+^F") == "^+f", "Ctrl Shift F accepted and canonicalized")
+    Verify(KweetyShortcut.Normalize("!а") == "!f" && KweetyShortcut.Normalize("!в") == "!d", "legacy Cyrillic shortcuts use their physical letter keys")
+    Verify(KweetyShortcut.Binding("^+f") == "$^+vk46", "letter shortcut registration uses a layout-independent key code")
     Verify(KweetyShortcut.Normalize("!^f") == KweetyShortcut.Normalize("^!F"), "modifier order does not bypass duplicate detection")
     Verify(KweetyShortcut.Normalize("#f8") == "#f8", "Windows modifier supported")
     Verify(KweetyShortcut.Normalize("^Esc") == KweetyShortcut.Normalize("^Escape"), "key aliases canonicalized for duplicate detection")

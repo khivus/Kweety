@@ -12,14 +12,35 @@ class KweetyShortcut {
         for symbol in ["^", "!", "+", "#"]
             if InStr(parts[1], symbol)
                 modifiers .= symbol
-        key := StrLower(GetKeyName(parts[2]))
-        if !GetKeyVK(key) && !GetKeySC(key)
+        key := this.LayoutKeyName(parts[2])
+        if key = ""
             throw Error("Неизвестная клавиша: " parts[2])
         if RegExMatch(key, "i)^(l|r)?(control|ctrl|alt|shift|win)$")
             throw Error("Выберите основную клавишу, например F или F8.")
         if !RegExMatch(modifiers, "[\^!#]") && !RegExMatch(key, "i)^(F([1-9]|1[0-9]|2[0-4])|Pause|ScrollLock)$")
             throw Error("Добавьте Ctrl, Alt или Win, либо выберите F1–F24, Pause или ScrollLock.")
         return modifiers key
+    }
+
+    static LayoutKeyName(name) {
+        ; Older shortcuts saved the character shown by the active Russian layout.
+        if RegExMatch(name, "i)^[а-яё]$")
+            name := KweetyCore.Aliases(name)[2]
+        if RegExMatch(name, "i)^[a-z]$")
+            return StrLower(name)
+        vk := GetKeyVK(name)
+        if vk >= 0x41 && vk <= 0x5A
+            return StrLower(Chr(vk))
+        if !vk && !GetKeySC(name)
+            return ""
+        key := StrLower(GetKeyName(name))
+        return RegExMatch(key, "^[а-яё]$") ? KweetyCore.Aliases(key)[2] : key
+    }
+
+    static Binding(key) {
+        if RegExMatch(key, "^([\^!+#]+)([a-z])$", &match)
+            key := match[1] Format("vk{:02X}", Ord(StrUpper(match[2])))
+        return "$" key
     }
 
     __New(dialog, value) {

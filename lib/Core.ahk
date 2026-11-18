@@ -217,6 +217,17 @@ class KweetyStore {
         return data[section][key]
     }
 
+    static ArchiveForReset(path) {
+        if !FileExist(path)
+            return ""
+        stem := path ".reset-" A_Now
+        archive := stem ".ini"
+        while FileExist(archive)
+            archive := stem "-" A_Index ".ini"
+        FileMove(path, archive)
+        return archive
+    }
+
     static Save(path, cfg) {
         KweetyCore.Validate(cfg.Items)
         if cfg.Items.Length > 1000

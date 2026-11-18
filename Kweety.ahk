@@ -3,7 +3,7 @@
 #ClipboardTimeout 250
 ;@Ahk2Exe-SetName Kweety
 ;@Ahk2Exe-SetDescription Kweety - text expansion
-;@Ahk2Exe-SetVersion 0.4.1
+;@Ahk2Exe-SetVersion 0.4.2
 #Include lib\Core.ahk
 #Include lib\Paste.ahk
 #Include lib\Startup.ahk
@@ -38,8 +38,10 @@ if !(A_Args.Length && A_Args[1] = "--background")
 
 class KweetyApp {
     __New() {
-        this.Path := A_AppData "\Kweety\settings.ini"
-        this.Config := KweetyStore.Load(this.Path)
+        this.Testing := A_Args.Length && A_Args[1] = "--smoke-test"
+        this.Path := this.Testing ? (A_Args.Length >= 2 ? A_Args[2] : "") : A_AppData "\Kweety\settings.ini"
+        reset := this.Testing ? (A_Args.Length >= 3 && A_Args[3] = "--reset-config")
+            : (A_Args.Length && A_Args[1] = "--reset-config")
         this.Paste := KweetyPaste()
         this.History := false
         OnExit((*) => (this.Paste.Restore(), 0))
@@ -48,7 +50,6 @@ class KweetyApp {
         this.VisibleItems := []
         this.RichEditor := false
         this.CachedWindow := 0
-        this.Testing := A_Args.Length && A_Args[1] = "--smoke-test"
         if !this.Testing
             this.History := KweetyHistory()
         this.Startup := KweetyStartup()
@@ -60,7 +61,8 @@ class KweetyApp {
         }
         this.Condition := (*) => this.Allowed()
         this.BuildGui()
-        this.Apply()
+        recovery := this.LoadStartupConfig(reset)
+        this.Refresh()
         this.EditorCondition := (*) => IsObject(this.RichEditor) && DllCall("GetFocus", "Ptr") = this.RichEditor.Hwnd
         HotIf(this.EditorCondition)
         Hotkey("^v", (*) => this.RichEditor.PasteFormatted())
@@ -75,10 +77,40 @@ class KweetyApp {
         if !A_IsCompiled && FileExist(A_ScriptDir "\assets\Kweety.ico")
             TraySetIcon(A_ScriptDir "\assets\Kweety.ico")
         this.UpdateTray()
+        if recovery != "" {
+            if this.Testing
+                FileAppend(recovery "`n", "*", "UTF-8")
+            else
+                MsgBox(recovery, "Kweety — сброс настроек", "Icon!")
+        }
+    }
+
+    LoadStartupConfig(reset) {
+        message := "Запрошен сброс настроек."
+        if !reset {
+            try {
+                this.Config := this.Path = "" ? KweetyStore.Defaults() : KweetyStore.Load(this.Path)
+                this.Apply()
+                return ""
+            } catch as err {
+                message := "Не удалось применить настройки:`n" err.Message "`n`nФайл: " this.Path
+            }
+        }
+        this.Config := KweetyStore.Defaults()
+        this.Apply()
+        message .= "`n`nKweety запущен с настройками по умолчанию."
+        try {
+            archive := KweetyStore.ArchiveForReset(this.Path)
+            if archive != ""
+                message .= "`nПрежние настройки и шаблоны сохранены:`n" archive
+        } catch as err {
+            message .= "`nНе удалось переместить прежний файл настроек:`n" err.Message
+        }
+        return message
     }
 
     BuildGui() {
-        g := this.Window := Gui(, "Kweety 0.4.1")
+        g := this.Window := Gui(, "Kweety 0.4.2")
         g.SetFont("s10", "Segoe UI")
         g.MarginX := 20
         g.MarginY := 16
@@ -123,7 +155,6 @@ class KweetyApp {
         g.OnEvent("Escape", (*) => g.Hide())
         this.TablePainter := KweetyTablePreview(g, this.List, this)
         KweetyLayout.Enable(g, this.List)
-        this.Refresh()
     }
 
     Show() => this.Window.Show()
@@ -258,8 +289,9 @@ class KweetyApp {
                 throw Error("Горячие клавиши не должны совпадать.")
             used[StrLower(key)] := true
             action := kind = "menu" ? this.Picker.Bind(this) : this.Transform.Bind(this, kind)
-            Hotkey("$" key, action, "On")
-            this.FeatureKeys.Push("$" key)
+            binding := KweetyShortcut.Binding(key)
+            Hotkey(binding, action, "On")
+            this.FeatureKeys.Push(binding)
         }
         Loop 3 {
             key := KweetyShortcut.Normalize(this.Config.%"HistoryKey" A_Index%)
@@ -268,8 +300,9 @@ class KweetyApp {
             if used.Has(StrLower(key))
                 throw Error("Горячие клавиши не должны совпадать.")
             used[StrLower(key)] := true
-            Hotkey("$" key, this.PasteHistory.Bind(this, this.Config.%"HistoryIndex" A_Index%), "On")
-            this.FeatureKeys.Push("$" key)
+            binding := KweetyShortcut.Binding(key)
+            Hotkey(binding, this.PasteHistory.Bind(this, this.Config.%"HistoryIndex" A_Index%), "On")
+            this.FeatureKeys.Push(binding)
         }
         HotIf()
         Hotstring("Reset")
