@@ -185,6 +185,13 @@ class KweetyHistory {
     Remember(entry) {
         if !entry.Size || entry.Size > 16000000
             return
+        if this.Items.Length {
+            ; Compare all formats so identical text with different formatting stays distinct.
+            latest := this.Items[1]
+            if entry.Size = latest.Size
+                && DllCall("msvcrt\memcmp", "Ptr", entry.Ptr, "Ptr", latest.Ptr, "UPtr", entry.Size, "CDecl Int") = 0
+                return
+        }
         this.Items.InsertAt(1, entry)
         if this.Items.Length > 20
             this.Items.Pop()

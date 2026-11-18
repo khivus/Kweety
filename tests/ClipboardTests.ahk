@@ -20,30 +20,38 @@ try {
     if !paste.Restore()
         throw Error("Буфер занят при восстановлении.")
     history := KweetyHistory()
+    Sleep(250)
     history.Items := []
-    A_Clipboard := "Kweety history A"
-    Sleep(100)
-    A_Clipboard := "Kweety history B"
-    Sleep(100)
-    if history.Items.Length != 2
-        throw Error("Clipboard observer did not record two external copies")
+    for index, value in ["Kweety history A", "Kweety history B", "Kweety history C"] {
+        A_Clipboard := value
+        deadline := A_TickCount + 1000
+        while history.Items.Length < index && A_TickCount < deadline
+            Sleep(20)
+        if history.Items.Length != index
+            throw Error("Clipboard observer did not record copy " index)
+    }
+    A_Clipboard := "Kweety history C"
+    Sleep(250)
+    if history.Items.Length != 3
+        throw Error("Repeated newest clipboard content shifted history indexes")
     if !paste.Prepare("Internal expansion")
         throw Error("Cannot prepare internal expansion")
     Sleep(100)
     paste.Restore()
     Sleep(100)
-    if history.Items.Length != 2
+    if history.Items.Length != 3
         throw Error("Internal clipboard changes polluted history")
-    saved := ClipboardAll()
-    paste.SeedOriginal(saved)
-    paste.Clipboard.Restore(history.Get(2))
-    paste.Expected := paste.Clipboard.Sequence()
-    if A_Clipboard != "Kweety history A"
-        throw Error("Second newest clipboard entry was not restored")
-    paste.Restore()
-    Sleep(100)
-    if A_Clipboard != "Kweety history B" || history.Items.Length != 2
-        throw Error("History paste changed current clipboard or history ordering")
+    for index, expected in ["Kweety history C", "Kweety history B", "Kweety history A"] {
+        paste.SeedOriginal(ClipboardAll())
+        paste.Clipboard.Restore(history.Get(index))
+        paste.Expected := paste.Clipboard.Sequence()
+        if A_Clipboard != expected
+            throw Error("Wrong clipboard entry at history index " index)
+        paste.Restore()
+        Sleep(100)
+        if A_Clipboard != "Kweety history C" || history.Items.Length != 3
+            throw Error("History paste changed current clipboard or history ordering")
+    }
     OnClipboardChange(history.Handler, 0)
     paste.Clipboard.Restore(original)
     FileAppend("PASS: Windows clipboard Unicode + HTML + RTF; history ordering and internal change suppression; original clipboard restored`n", "*", "UTF-8")
