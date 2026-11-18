@@ -3,7 +3,7 @@
 #ClipboardTimeout 250
 ;@Ahk2Exe-SetName Kweety
 ;@Ahk2Exe-SetDescription Kweety - text expansion
-;@Ahk2Exe-SetVersion 0.4.2
+;@Ahk2Exe-SetVersion 0.4.3
 #Include lib\Core.ahk
 #Include lib\Paste.ahk
 #Include lib\Startup.ahk
@@ -62,6 +62,7 @@ class KweetyApp {
         this.Condition := (*) => this.Allowed()
         this.BuildGui()
         recovery := this.LoadStartupConfig(reset)
+        this.ResetOptions()
         this.Refresh()
         this.EditorCondition := (*) => IsObject(this.RichEditor) && DllCall("GetFocus", "Ptr") = this.RichEditor.Hwnd
         HotIf(this.EditorCondition)
@@ -72,7 +73,7 @@ class KweetyApp {
         this.TrayLabel := "Состояние замены"
         A_TrayMenu.Add(this.TrayLabel, (*) => this.Toggle())
         A_TrayMenu.Add()
-        A_TrayMenu.Add("Выход", (*) => ExitApp())
+        A_TrayMenu.Add("Выход", (*) => this.CloseOptions(true))
         A_TrayMenu.Default := "Открыть Kweety"
         if !A_IsCompiled && FileExist(A_ScriptDir "\assets\Kweety.ico")
             TraySetIcon(A_ScriptDir "\assets\Kweety.ico")
@@ -110,28 +111,25 @@ class KweetyApp {
     }
 
     BuildGui() {
-        g := this.Window := Gui(, "Kweety 0.4.2")
+        g := this.Window := Gui(, "Kweety 0.4.3")
         g.SetFont("s10", "Segoe UI")
         g.MarginX := 20
         g.MarginY := 16
         g.AddText("xm w730", "Пишите меньше. Говорите больше.")
         this.Enabled := g.AddCheckbox("xm y+14", "Замена сокращений включена")
-        this.Enabled.OnEvent("Click", (*) => this.SaveOptions())
         this.FastPaste := g.AddCheckbox("x+26 yp", "Вставлять весь текст целиком (Ctrl+V)")
-        this.FastPaste.OnEvent("Click", (*) => this.SaveOptions())
         this.Autostart := g.AddCheckbox("xm y+12", "Запускать при входе в Windows, свернув в трей")
-        this.Autostart.Value := this.Startup.IsEnabled()
-        this.Autostart.OnEvent("Click", (*) => this.SaveStartup())
         g.AddText("xm y+18", "Заменять после нажатия:")
         this.Keys := Map()
         for i, entry in [["Space", "Пробел"], ["Enter", "Enter"], ["Tab", "Tab"]] {
             key := entry[1], label := entry[2]
             cb := g.AddCheckbox(i = 1 ? "xm y+10" : "x+24 yp", label)
-            cb.OnEvent("Click", (*) => this.SaveOptions())
             this.Keys[key] := cb
         }
         this.Immediate := g.AddCheckbox("xm y+12", "Сразу после последнего символа сокращения")
-        this.Immediate.OnEvent("Click", (*) => this.SaveOptions())
+        this.Options := Map("Enabled", this.Enabled, "FastPaste", this.FastPaste, "Immediate", this.Immediate)
+        for key, cb in this.Keys
+            this.Options[key] := cb
         this.ModeHint := g.AddText("xm y+18 w730 c555555", "")
         g.AddText("xm y+14", "Поиск шаблонов:")
         this.Search := g.AddEdit("x+12 yp-3 w550")
@@ -146,15 +144,22 @@ class KweetyApp {
         g.AddButton("x+10 w120", "Удалить").OnEvent("Click", (*) => this.Delete())
         g.AddText("xm y+14 w730 c555555", "Двойной щелчок — изменить. Цвет и начертание доступны в редакторе шаблона.")
         this.Status := g.AddText("xm y+12 w730", "")
-        g.AddButton("xm y+14 w170", "Свернуть в трей").OnEvent("Click", (*) => g.Hide())
-        g.AddButton("x+10 w120", "Горячие клавиши").OnEvent("Click", (*) => this.Settings())
+        g.AddButton("xm y+14 w120", "Горячие клавиши").OnEvent("Click", (*) => this.Settings())
         g.AddButton("x+10 w120", "Исключения").OnEvent("Click", (*) => this.Exclusions())
         g.AddButton("xm y+10 w150", "Папка настроек").OnEvent("Click", (*) => this.OpenData())
         g.AddButton("x+10 w140", "Импорт Punto").OnEvent("Click", (*) => this.ImportPunto())
-        g.OnEvent("Close", (*) => g.Hide())
-        g.OnEvent("Escape", (*) => g.Hide())
+        this.List.GetPos(&listLeft, , &listWidth)
+        this.ApplyButton := g.AddButton("x" (listLeft + listWidth - 120 - 10 - 140) " yp w120", "Применить")
+        close := g.AddButton("x+10 w140", "Свернуть в трей")
+        this.ApplyButton.OnEvent("Click", (*) => this.SaveOptions())
+        close.OnEvent("Click", (*) => this.CloseOptions())
+        g.OnEvent("Close", (*) => this.CloseOptions())
+        g.OnEvent("Escape", (*) => this.CloseOptions())
+        for property, control in this.Options
+            control.OnEvent("Click", (*) => this.UpdateOptionControls())
+        this.Autostart.OnEvent("Click", (*) => this.UpdateOptionControls())
         this.TablePainter := KweetyTablePreview(g, this.List, this)
-        KweetyLayout.Enable(g, this.List)
+        KweetyLayout.Enable(g, this.List, this.ApplyButton, close)
     }
 
     Show() => this.Window.Show()
@@ -194,12 +199,13 @@ class KweetyApp {
         this.Apply()
         if !this.Immediate.Enabled
             throw Error("Immediate control unavailable")
-        this.Refresh()
+        this.ResetOptions()
         for key, control in this.Keys
             if control.Enabled
                 throw Error("Terminator controls must be disabled in immediate mode")
         this.Config := original
         this.Apply()
+        this.ResetOptions()
         this.Refresh()
         exceptions := this.Exclusions()
         exceptions.Destroy()
@@ -217,16 +223,6 @@ class KweetyApp {
     }
 
     Refresh() {
-        this.Enabled.Value := this.Config.Enabled
-        this.FastPaste.Value := this.Config.FastPaste
-        this.Immediate.Value := this.Config.Immediate
-        for name, cb in this.Keys
-            cb.Enabled := !this.Config.Immediate
-        this.ModeHint.Text := this.Config.FastPaste
-            ? "Ctrl+V: быстрая вставка через буфер, с оформлением, если оно включено у шаблона."
-            : "Режим клавиш: обычный текст без оформления, переносы — Shift+Enter. Для совместимости."
-        for name, cb in this.Keys
-            cb.Value := this.Config.%name%
         this.FillList()
         this.Status.Text := (this.Config.Enabled ? "● Работает" : "● Приостановлено") "  ·  Шаблонов: " this.Config.Items.Length
         this.UpdateTray()
@@ -358,17 +354,28 @@ class KweetyApp {
         return target && WinActive("ahk_id " target)
     }
 
-    Persist(cfg) {
+    Persist(cfg, autostart := unset) {
         previous := this.Config
+        startupChanged := false
         try {
             this.Config := cfg
             this.Apply()
+            if IsSet(autostart) && autostart != this.Startup.IsEnabled() {
+                this.Startup.SetEnabled(autostart)
+                startupChanged := true
+            }
             KweetyStore.Save(this.Path, cfg)
         }
         catch as err {
             this.Config := previous
             this.Apply()
-            MsgBox(err.Message, "Не удалось сохранить", "Iconx")
+            message := err.Message
+            if startupChanged {
+                try this.Startup.SetEnabled(!autostart)
+                catch as rollbackError
+                    message .= "`n`nНе удалось восстановить автозапуск.`n" rollbackError.Message
+            }
+            MsgBox(message, "Не удалось сохранить", "Iconx")
             return false
         }
         this.Refresh()
@@ -381,28 +388,67 @@ class KweetyApp {
         Enter: this.Config.Enter, Tab: this.Config.Tab, Items: this.Config.Items.Clone(),
         LayoutKey: this.Config.LayoutKey, CaseKey: this.Config.CaseKey, InvertCaseKey: this.Config.InvertCaseKey, MenuKey: this.Config.MenuKey, Excluded: this.Config.Excluded.Clone()}
 
-    SaveOptions() {
-        cfg := this.CopyConfig()
-        cfg.Enabled := this.Enabled.Value
-        cfg.FastPaste := this.FastPaste.Value
-        cfg.Immediate := this.Immediate.Value
-        for name, cb in this.Keys
-            cfg.%name% := cb.Value
-        if !this.Persist(cfg)
-            this.Refresh()
+    OptionsChanged() {
+        for property, control in this.Options
+            if control.Value != this.Config.%property%
+                return true
+        return this.Autostart.Value != this.Startup.IsEnabled()
     }
 
-    SaveStartup() {
-        try this.Startup.SetEnabled(this.Autostart.Value)
-        catch as err
-            MsgBox("Не удалось изменить автозапуск.`n`n" err.Message, "Kweety", "Iconx")
+    ResetOptions() {
+        for property, control in this.Options
+            control.Value := this.Config.%property%
         this.Autostart.Value := this.Startup.IsEnabled()
+        this.UpdateOptionControls()
+    }
+
+    UpdateOptionControls() {
+        for key, control in this.Keys
+            control.Enabled := !this.Immediate.Value
+        this.ModeHint.Text := this.FastPaste.Value
+            ? "Ctrl+V: быстрая вставка через буфер, с оформлением, если оно включено у шаблона."
+            : "Режим клавиш: обычный текст без оформления, переносы — Shift+Enter. Для совместимости."
+        this.ApplyButton.Enabled := this.OptionsChanged()
+    }
+
+    SaveOptions() {
+        if !this.OptionsChanged()
+            return true
+        this.Window.Opt("+OwnDialogs")
+        cfg := this.CopyConfig()
+        for property, control in this.Options
+            cfg.%property% := control.Value
+        if !this.Persist(cfg, this.Autostart.Value) {
+            this.UpdateOptionControls()
+            return false
+        }
+        this.ResetOptions()
+        return true
+    }
+
+    CloseOptions(exit := false) {
+        if this.OptionsChanged() {
+            answer := MsgBox("Применить изменения перед закрытием?`n`n«Нет» — закрыть без сохранения.",
+                "Несохранённые изменения", "YesNoCancel Default3 Icon? Owner" this.Window.Hwnd)
+            if answer = "Cancel" || (answer = "Yes" && !this.SaveOptions())
+                return true
+            this.ResetOptions()
+        }
+        if exit
+            ExitApp()
+        this.Window.Hide()
+        return true
     }
 
     Toggle() {
         cfg := this.CopyConfig()
+        followTray := this.Enabled.Value = cfg.Enabled
         cfg.Enabled := !cfg.Enabled
-        this.Persist(cfg)
+        if this.Persist(cfg) {
+            if followTray
+                this.Enabled.Value := cfg.Enabled
+            this.UpdateOptionControls()
+        }
     }
 
     OpenData() {
@@ -800,6 +846,7 @@ class KweetyApp {
                     cfg.Excluded.Push(rule)
         }
         oldStartup := this.Startup.IsEnabled()
+        followStartup := this.Autostart.Value = oldStartup
         if copyStartup {
             try this.Startup.SetEnabled(preferences.Startup)
             catch as err {
@@ -808,7 +855,9 @@ class KweetyApp {
             }
         }
         if this.Persist(cfg) {
-            this.Autostart.Value := this.Startup.IsEnabled()
+            if followStartup
+                this.Autostart.Value := this.Startup.IsEnabled()
+            this.UpdateOptionControls()
             close.Call()
         } else if copyStartup
             this.Startup.SetEnabled(oldStartup)

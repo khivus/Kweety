@@ -2,25 +2,29 @@
 
 class KweetyLayout {
     ; Keep the original spacing; grow the main working area and anchor its footer.
-    static Enable(window, workspace) {
+    static Enable(window, workspace, rightAnchored*) {
         window.Opt("+Resize")
         window.Show("Hide AutoSize")
-        layout := KweetyLayout(window, workspace)
+        layout := KweetyLayout(window, workspace, rightAnchored)
         window.OnEvent("Size", layout.Resize.Bind(layout))
         return layout
     }
 
-    __New(window, workspace) {
+    __New(window, workspace, rightAnchored) {
         window.GetClientPos(, , &width, &height)
         this.Width := width, this.Height := height
         this.Workspace := workspace
         workspace.GetPos(, &top, , &workHeight)
+        anchored := Map()
+        for control in rightAnchored
+            anchored[control.Hwnd] := true
         this.Controls := []
         for control in window {
             control.GetPos(&x, &y, &w, &h)
             this.Controls.Push({Control: control, X: x, Y: y, W: w, H: h,
                 Stretch: control.Hwnd = workspace.Hwnd || (w > width / 2 && control.Type != "Button"),
-                Grow: control.Hwnd = workspace.Hwnd, Footer: y >= top + workHeight})
+                Grow: control.Hwnd = workspace.Hwnd, Footer: y >= top + workHeight,
+                Right: anchored.Has(control.Hwnd)})
         }
         window.Opt("+MinSize" width "x" (height - workHeight + Min(80, workHeight)))
     }
@@ -30,7 +34,7 @@ class KweetyLayout {
             return
         dx := width - this.Width, dy := height - this.Height
         for item in this.Controls {
-            item.Control.Move(item.X, item.Y + (item.Footer ? dy : 0),
+            item.Control.Move(item.X + (item.Right ? dx : 0), item.Y + (item.Footer ? dy : 0),
                 item.W + (item.Stretch ? dx : 0), item.H + (item.Grow ? dy : 0))
             if item.Control.Type = "ListView" {
                 columns := SendMessage(0x101F, 0, 0, item.Control.Hwnd) ; LVM_GETHEADER
