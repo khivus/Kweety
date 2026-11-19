@@ -3,7 +3,7 @@
 #ClipboardTimeout 250
 ;@Ahk2Exe-SetName Kweety
 ;@Ahk2Exe-SetDescription Kweety - text expansion
-;@Ahk2Exe-SetVersion 0.4.4
+;@Ahk2Exe-SetVersion 0.4.5
 #Include lib\Core.ahk
 #Include lib\Paste.ahk
 #Include lib\Startup.ahk
@@ -49,7 +49,7 @@ class KweetyApp {
         OnExit((*) => (this.Paste.Restore(), 0))
         this.Registered := []
         this.FeatureKeys := []
-        this.VisibleItems := []
+        this.VisibleItemIndices := Map()
         this.RichEditor := false
         this.CachedWindow := 0
         if !this.Testing
@@ -113,7 +113,7 @@ class KweetyApp {
     }
 
     BuildGui() {
-        g := this.Window := Gui(, "Kweety 0.4.4")
+        g := this.Window := Gui(, "Kweety 0.4.5")
         g.SetFont("s10", "Segoe UI")
         g.MarginX := 20
         g.MarginY := 16
@@ -185,8 +185,35 @@ class KweetyApp {
         testConfig.Items := []
         Loop Parse "йцукенгшщзхъфывапролджэячсмитьбюё"
             testConfig.Items.Push({Trigger: A_LoopField, Text: "Тест`n{Enter}"})
+        testConfig.Items.Push({Trigger: "hello", Text: "Z sort test"}, {Trigger: "café", Text: "A sort test"})
+        testConfig.Items.Push({Trigger: "", Text: "C sort test"}, {Trigger: "", Text: "B sort test"})
         this.Config := testConfig
         this.Apply()
+        this.Search.Value := "sort test"
+        this.FillList()
+        this.List.ModifyCol(3, "Sort")
+        if this.List.GetText(1, 1) != "café" || this.ItemIndexAt(1) != testConfig.Items.Length - 2
+            throw Error("The sorted row did not identify the letter-only abbreviation")
+        this.List.Modify(2, "Select Focus")
+        editor := this.Edit()
+        if this.List.GetText(2, 1) != "" || this.RichEditor.Export().Text != "B sort test"
+            throw Error("The selected sorted row opened the wrong picker-only template")
+        editor.Destroy()
+        this.RichEditor := false
+        this.Window.Opt("-Disabled")
+        this.Search.Value := ""
+        pickerTest := Gui()
+        pickerList := pickerTest.AddListView(, ["Сокращение", "Текст"])
+        pickerItems := Map()
+        this.FillPicker(pickerList, "CAFÉ", pickerItems)
+        if pickerList.GetCount() != 1 || pickerList.GetText(1, 1) != "café"
+            throw Error("The picker did not find the letter-only abbreviation")
+        this.FillPicker(pickerList, "sort test", pickerItems)
+        pickerList.ModifyCol(2, "Sort")
+        if pickerItems[KweetyApp.ListItemId(pickerList, 2)].Text != "B sort test"
+            || pickerItems[KweetyApp.ListItemId(pickerList, 3)].Text != "C sort test"
+            throw Error("The sorted picker did not identify both picker-only templates")
+        pickerTest.Destroy()
         this.Config.Items := []
         this.Apply()
         this.Config := original
@@ -248,16 +275,21 @@ class KweetyApp {
 
     FillList() {
         this.TablePainter.Cache := Map()
-        this.List.Delete(), this.VisibleItems := []
+        this.List.Delete(), this.VisibleItemIndices.Clear()
         for index, item in this.Config.Items {
             if !KweetyText.Matches(item, this.Search.Value)
                 continue
             aliases := KweetyCore.Aliases(item.Trigger)
             preview := StrReplace(StrReplace(item.Text, "`r"), "`n", " ↵ ")
-            this.List.Add(, item.Trigger, aliases[aliases.Length], SubStr(preview, 1, 180))
-            this.VisibleItems.Push(index)
+            row := this.List.Add(, item.Trigger, aliases[aliases.Length], SubStr(preview, 1, 180))
+            this.VisibleItemIndices[KweetyApp.ListItemId(this.List, row)] := index
         }
     }
+
+    ItemIndexAt(row) => row ? this.VisibleItemIndices.Get(KweetyApp.ListItemId(this.List, row), 0) : 0
+
+    ; Windows assigns IDs that stay with the rows when the list is sorted.
+    static ListItemId(list, row) => SendMessage(0x10B4, row - 1, 0, list.Hwnd) ; LVM_MAPINDEXTOID
 
     Apply() {
         this.CachedWindow := 0
@@ -271,6 +303,8 @@ class KweetyApp {
         endings := (this.Config.Space ? " " : "") (this.Config.Enter ? "`n" : "") (this.Config.Tab ? "`t" : "")
         Hotstring("EndChars", endings)
         for item in this.Config.Items {
+            if item.Trigger = ""
+                continue
             payload := this.Config.FastPaste ? [] : KweetyCore.CompileBatches(item.Text)
             for alias in KweetyCore.Aliases(item.Trigger) {
                 ; B0: delete the abbreviation in the SAME send as its replacement.
@@ -462,11 +496,13 @@ class KweetyApp {
     }
 
     Delete() {
-        row := this.List.GetNext()
+        selectedRow := this.List.GetNext()
+        row := this.ItemIndexAt(selectedRow)
         if !row
             return
-        row := this.VisibleItems[row]
-        if MsgBox("Удалить «" this.Config.Items[row].Trigger "»?", "Удаление шаблона", "YesNo Icon?") != "Yes"
+        trigger := this.Config.Items[row].Trigger
+        name := trigger != "" ? trigger : this.List.GetText(selectedRow, 3)
+        if MsgBox("Удалить «" name "»?", "Удаление шаблона", "YesNo Icon?") != "Yes"
             return
         cfg := this.CopyConfig()
         cfg.Items.RemoveAt(row)
@@ -474,19 +510,17 @@ class KweetyApp {
     }
 
     Edit(isNew := false) {
-        row := isNew ? 0 : this.List.GetNext()
+        row := isNew ? 0 : this.ItemIndexAt(this.List.GetNext())
         if !isNew && !row
             return
-        if row
-            row := this.VisibleItems[row]
         original := row ? this.Config.Items[row] : {Trigger: "", Text: ""}
         editor := Gui("+Owner" this.Window.Hwnd, row ? "Изменить шаблон" : "Новый шаблон")
         editor.SetFont("s10", "Segoe UI")
         editor.MarginX := 20
         editor.MarginY := 16
-        editor.AddText(, "Сокращение")
+        editor.AddText(, "Сокращение (необязательно)")
         trigger := editor.AddEdit("xm y+6 w580", original.Trigger)
-        editor.AddText("xm y+10 w580 c555555", "Буквы, цифры, _ и -. Вторая раскладка добавится автоматически.")
+        editor.AddText("xm y+10 w580 c555555", "Оставьте поле пустым для вставки только через «Меню шаблонов».`nДопустимы буквы, цифры, _ и -. Вторая раскладка добавляется автоматически.")
         formatting := editor.AddCheckbox("xm y+16", "Использовать оформление (цвет, жирный, курсив)")
         formatting.Value := original.HasOwnProp("Formatting") && original.Formatting
         editor.Formatting := formatting
@@ -763,10 +797,10 @@ class KweetyApp {
         search := popup.AddEdit("w620")
         list := popup.AddListView("xm y+10 w620 r10 -Multi", ["Сокращение", "Текст"])
         list.ModifyCol(1, 120), list.ModifyCol(2, 470)
-        rows := []
-        fill := (*) => this.FillPicker(list, search.Value, rows)
+        itemsById := Map()
+        fill := (*) => this.FillPicker(list, search.Value, itemsById)
         search.OnEvent("Change", fill)
-        insert := (*) => this.PickInsert(popup, list, rows, target)
+        insert := (*) => this.PickInsert(popup, list, itemsById, target)
         popup.AddButton("xm y+10 w140 Default", "Вставить").OnEvent("Click", insert)
         popup.AddButton("x+10 w140", "Отмена").OnEvent("Click", (*) => popup.Destroy())
         list.OnEvent("DoubleClick", insert)
@@ -780,23 +814,23 @@ class KweetyApp {
         return popup
     }
 
-    FillPicker(list, query, rows) {
-        list.Delete(), rows.Length := 0
+    FillPicker(list, query, itemsById) {
+        list.Delete(), itemsById.Clear()
         for item in this.Config.Items {
             if KweetyText.Matches(item, query) {
-                list.Add(, item.Trigger, SubStr(StrReplace(StrReplace(item.Text, "`r"), "`n", " ↵ "), 1, 100))
-                rows.Push(item)
+                row := list.Add(, item.Trigger, SubStr(StrReplace(StrReplace(item.Text, "`r"), "`n", " ↵ "), 1, 100))
+                itemsById[KweetyApp.ListItemId(list, row)] := item
             }
         }
-        if rows.Length
+        if itemsById.Count
             list.Modify(1, "Select Focus")
     }
 
-    PickInsert(popup, list, rows, target) {
+    PickInsert(popup, list, itemsById, target) {
         row := list.GetNext()
         if !row || !WinExist("ahk_id " target) || !this.Allowed(target)
             return
-        item := rows[row]
+        item := itemsById[KweetyApp.ListItemId(list, row)]
         popup.Destroy()
         WinActivate("ahk_id " target)
         if WinWaitActive("ahk_id " target, , 0.5)

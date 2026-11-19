@@ -21,8 +21,8 @@ class KweetyCore {
     static Validate(items) {
         used := Map()
         for item in items {
-            if !RegExMatch(item.Trigger, "i)^[a-zа-яё0-9_-]{1,40}\z")
-                throw Error("Сокращение: от 1 до 40 букв, цифр, знаков _ или -.")
+            if StrLen(item.Trigger) > 40 || !RegExMatch(item.Trigger, "^[\p{L}0-9_-]*\z")
+                throw Error("Введите сокращение длиной до 40 символов. Разрешены буквы, цифры 0–9, _ и -.")
             if item.Text = ""
                 throw Error("Введите текст для подстановки.")
             if StrLen(item.Text) > 50000
@@ -30,6 +30,8 @@ class KweetyCore {
             for property in ["Rtf", "Html"]
                 if item.HasOwnProp(property) && StrLen(item.%property%) > 4000000
                     throw Error("Слишком большой объём оформления шаблона.")
+            if item.Trigger = ""
+                continue
             for alias in this.Aliases(item.Trigger) {
                 if used.Has(alias)
                     throw Error("Сокращение «" item.Trigger "» совпадает с «" used[alias] "» в одной из раскладок.")

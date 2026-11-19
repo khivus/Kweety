@@ -305,9 +305,10 @@ class KweetyTablePreview {
         if stage != 0x30001 || NumGet(data, A_PtrSize = 8 ? 88 : 56, "Int") != 2
             return
         index := NumGet(data, A_PtrSize = 8 ? 56 : 36, "UPtr") + 1
-        if index > this.App.VisibleItems.Length
+        itemIndex := this.App.ItemIndexAt(index)
+        if !itemIndex
             return
-        item := this.App.Config.Items[this.App.VisibleItems[index]]
+        item := this.App.Config.Items[itemIndex]
         if !item.HasOwnProp("Formatting") || !item.Formatting || !item.HasOwnProp("Rtf") || item.Rtf = ""
             return
         dc := NumGet(data, A_PtrSize = 8 ? 32 : 16, "Ptr")
@@ -320,15 +321,15 @@ class KweetyTablePreview {
         try {
             DllCall("IntersectClipRect", "Ptr", dc, "Int", left, "Int", top, "Int", right, "Int", bottom)
             DllCall("FillRect", "Ptr", dc, "Ptr", rect, "Ptr", DllCall("GetSysColorBrush", "Int", 5, "Ptr"))
-            if !this.Cache.Has(index) {
+            if !this.Cache.Has(itemIndex) {
                 source := item
                 if !item.HasOwnProp("Html") || item.Html = "" {
                     this.Renderer.StreamIn(item.Rtf)
                     source := this.Renderer.Export()
                 }
-                this.Cache[index] := KweetyRich.Preview(source).Rtf
+                this.Cache[itemIndex] := KweetyRich.Preview(source).Rtf
             }
-            this.Renderer.StreamIn(this.Cache[index])
+            this.Renderer.StreamIn(this.Cache[itemIndex])
             format := Buffer(A_PtrSize * 2 + 40, 0)
             NumPut("Ptr", dc, "Ptr", dc, format)
             dpiX := DllCall("GetDeviceCaps", "Ptr", dc, "Int", 88)

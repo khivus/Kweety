@@ -55,9 +55,10 @@ try {
     Assert(KweetyCore.Aliases("123_-").Length = 1, "identical aliases deduplicated")
     Throws(() => KweetyCore.Validate([{Trigger: "fff", Text: "a"}, {Trigger: "ааа", Text: "b"}]), "layout collision")
     Throws(() => KweetyCore.Validate([{Trigger: "FFF", Text: "a"}, {Trigger: "fff", Text: "b"}]), "case collision")
-    for trigger in ["", "two words", "a:b", "{Enter}", "a`t", "a`n"]
+    for trigger in ["two words", "a:b", "{Enter}", "a`t", "a`n"]
         Throws(() => KweetyCore.Validate([{Trigger: trigger, Text: "a"}]), "invalid abbreviation")
     Throws(() => KweetyCore.Validate([{Trigger: "x", Text: ""}]), "empty body")
+    Throws(() => KweetyCore.Validate([{Trigger: "", Text: ""}]), "picker-only template needs text")
     literal := "Привет {Enter} !^+# = \n`t😀"
     Assert(KweetyCore.Decode(KweetyCore.Encode(literal)) == literal, "UTF8 literal round trip")
     Throws(() => KweetyCore.Decode("FFF"), "odd hex rejected")
@@ -130,10 +131,15 @@ try {
     paste.Restore()
     cfg := KweetyStore.Defaults()
     cfg.Items[1].Text := longText "`nВторая строка"
+    cfg.Items.Push({Trigger: "café", Text: "Акцент"}, {Trigger: "日本語", Text: "Японский"})
+    cfg.Items.Push({Trigger: "", Text: "First picker-only template"}, {Trigger: "", Text: "Second picker-only template"})
     path := A_Temp "\Kweety-test-" DllCall("GetCurrentProcessId") "\settings.ini"
     KweetyStore.Save(path, cfg)
     loaded := KweetyStore.Load(path)
     Assert(loaded.Items[1].Text == cfg.Items[1].Text, "long text persistence beyond INI API limit")
+    Assert(loaded.Items[2].Trigger == "café" && loaded.Items[3].Trigger == "日本語", "Unicode letter-only abbreviations persisted")
+    for index in [4, 5]
+        Assert(loaded.Items[index].Trigger == "" && loaded.Items[index].Text == cfg.Items[index].Text, "picker-only template persisted")
     Assert(loaded.Enter && loaded.Space && !loaded.Tab, "default keys persisted")
     Assert(loaded.FastPaste, "fast paste defaults on")
     loaded.Tab := 1
