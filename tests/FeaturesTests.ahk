@@ -24,6 +24,7 @@ Reject(call, message) {
     Verify(failed, message)
 }
 try {
+    Verify(KweetyInputLanguage.MaskKey = 0x07, "Alt mask avoids EVE-X-Preview's VK_E8 activation hotkey")
     ; VK_LMENU, VK_LSHIFT, and VK_RSHIFT exercise both press and release orders.
     for shift in [0xA0, 0xA1] {
         for pressOrder in [[0xA4, shift], [shift, 0xA4]] {

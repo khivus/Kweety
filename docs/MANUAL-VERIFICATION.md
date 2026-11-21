@@ -6,6 +6,12 @@ do not establish compatibility with Mail.ru or any other live editor.
 
 Use the newly built `dist/Kweety.exe` or run `Kweety.ahk` with AutoHotkey v2.
 
+- With EVE-X-Preview and the other AHK app running, enable Kweety's Alt+Shift
+  layout switching. In an external editor, switch with left Alt and either Shift,
+  trying both press and release orders. The language should change once, focus
+  should stay in the editor, and no menu should open. Check that EVE-X-Preview's
+  normal window-switching shortcuts still work.
+
 - Open shortcut settings. Assign Ctrl+Shift+F to template search by selecting Ctrl,
   Shift, and F; save and use it in an external editor. Search should open. Select
   a template and insert it: focus should return to the original editor.

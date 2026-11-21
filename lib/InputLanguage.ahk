@@ -1,6 +1,9 @@
 #Requires AutoHotkey v2.0
 
 class KweetyInputLanguage {
+    ; VK_E8 is EVE-X-Preview's internal foreground-activation hotkey.
+    ; Use the unassigned VK_07 to mask Alt without triggering that hotkey.
+    static MaskKey := 0x07
     Hook := 0
     Callback := 0
     Alt := false
@@ -42,8 +45,8 @@ class KweetyInputLanguage {
                 action := this.Track(key, up)
                 if action = "mask" {
                     ; An unassigned virtual key keeps Alt-up from opening menus.
-                    DllCall("keybd_event", "UChar", 0xE8, "UChar", 0, "UInt", 0, "UPtr", 0)
-                    DllCall("keybd_event", "UChar", 0xE8, "UChar", 0, "UInt", 2, "UPtr", 0)
+                    DllCall("keybd_event", "UChar", KweetyInputLanguage.MaskKey, "UChar", 0, "UInt", 0, "UPtr", 0)
+                    DllCall("keybd_event", "UChar", KweetyInputLanguage.MaskKey, "UChar", 0, "UInt", 2, "UPtr", 0)
                 } else if action = "switch" {
                     this.SwitchLayout()
                 }
